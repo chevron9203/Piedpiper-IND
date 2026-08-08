@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Backtest{% endblock %}
+
+{% block content %}
+<h1>Backtest &amp; Research</h1>
+<p class="subtitle">Walk-forward out-of-sample results. Run <code>python scripts/backtest_run.py</code> to populate.</p>
+
+{% if not results_available %}
+<div class="alert-empty">
+  <div style="font-size:2rem;margin-bottom:0.5rem;">&#x1f4ca;</div>
+  <strong>No backtest results found.</strong>
+  <div class="muted" style="margin-top:0.5rem;">
+    Run <code>python scripts/backtest_run.py</code> to execute the walk-forward backtest.<br>
+    Results will be saved to <code>data_store/backtest_results.parquet</code>.
+  </div>
+</div>
+{% else %}
+
+{% if date_range %}
+<p class="muted" style="margin-bottom:1rem;">
+  Period: <span class="mono">{{ date_range }}</span>
+  &nbsp;&mdash;&nbsp;
+  <span class="mono">{{ n_folds }}</span> walk-forward fold{{ 's' if n_folds != 1 else '' }}
+</p>
+{% endif %}
+
+<!-- Metrics comparison table: Gross vs Net -->
+<div class="card">
+  <h2 style="margin-top:0;">Walk-Forward OOS Metrics</h2>
+  <div class="table-wrapper" style="margin-bottom:0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Before Costs (Gross)</th>
+          <th>After Costs (Net)</th>
+          <th>Cost Drag</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="text-col"><strong>Sharpe Ratio</strong></td>
+          <td>{{ gross_sharpe }}</td>
+          <td>{{ net_sharpe }}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td class="text-col"><strong>Sortino Ratio</strong></td>
+          <td>{{ gross_sortino }}</td>
+          <td>{{ net_sortino }}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td class="text-col"><strong>Max Drawdown</strong></td>
+          <td>{{ gross_maxdd }}</td>
+          <td>{{ net_maxdd }}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td class="text-col"><strong>CAGR</strong></td>
+          <td>{{ gross_cagr }}</td>
+          <td>{{ net_cagr }}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td class="text-col"><strong>Hit Rate</strong></td>
+          <td>{{ gross_hitrate }}</td>
+          <td>{{ net_hitrate }}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td class="text-col"><strong>Win/Loss Ratio</strong></td>
+          <td>{{ gross_wl }}</td>
+          <td>{{ net_wl }}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td class="text-col"><strong>Total Trades</strong></td>
+          <td>{{ gross_trades }}</td>
+          <td>{{ net_trades }}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td class="text-col"><strong>Total P&amp;L</strong></td>
+          <td class="{{ 'pos' if gross_pnl_pos else 'neg' }}">{{ gross_pnl }}</td>
+          <td class="{{ 'pos' if net_pnl_pos else 'neg' }}">{{ net_pnl }}</td>
+          <td class="muted">—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Deflated Sharpe warning -->
+<div class="alert alert-warning">
+  <strong>Deflated Sharpe reminder:</strong> If multiple model variants or parameter sets
+  were tested before settling on this configuration, the reported Sharpe is optimistically
+  biased. Bailey-Lopez deflated Sharpe applies. The script will print a warning when
+  <code>--multiple-variants</code> mode is used.
+</div>
+
+<!-- Sample trades -->
+{% if trades %}
+<div class="section-header">
+  <h2>Sample OOS Trades</h2>
+  <span class="section-count">showing first 50</span>
+</div>
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Entry Date</th>
+        <th>Entry Price</th>
+        <th>Exit Date</th>
+        <th>Exit Price</th>
+        <th>Gross P&amp;L</th>
+        <th>Net P&amp;L</th>
+        <th>Reason</th>
+        <th>Fold</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in trades %}
+      <tr>
+        <td><strong>{{ t.symbol }}</strong></td>
+        <td>{{ t.entry_date | string | truncate(10, True, '') if t.entry_date else '—' }}</td>
+        <td>{{ "%.2f"|format(t.entry_price) if t.entry_price else '—' }}</td>
+        <td>{{ t.exit_date | string | truncate(10, True, '') if t.exit_date else '—' }}</td>
+        <td>{{ "%.2f"|format(t.exit_price) if t.exit_price else '—' }}</td>
+        <td class="{{ 'pos' if t.gross_pnl and t.gross_pnl > 0 else 'neg' }}">
+          {% if t.gross_pnl %}&#x20b9;{{ "{:+,.0f}".format(t.gross_pnl) }}{% else %}—{% endif %}
+        </td>
+        <td class="{{ 'pos' if t.net_pnl and t.net_pnl > 0 else 'neg' }}">
+          {% if t.net_pnl %}<strong>&#x20b9;{{ "{:+,.0f}".format(t.net_pnl) }}</strong>{% else %}—{% endif %}
+        </td>
+        <td>
+          {% set r = t.exit_reason or '' %}
+          {% if r == 'target' %}<span class="badge badge-green">target</span>
+          {% elif r == 'stop_loss' %}<span class="badge badge-red">stop</span>
+          {% elif r == 'max_hold' %}<span class="badge badge-orange">max hold</span>
+          {% elif r %}<span class="badge badge-grey">{{ r }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="muted">{{ t.split_id if t.split_id is defined and t.split_id is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endif %}
+
+{% endblock %}

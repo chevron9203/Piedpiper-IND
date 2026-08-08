@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Today's Signals{% endblock %}
+
+{% block content %}
+<h1>Today's Signals</h1>
+<p class="subtitle">
+  {{ run_date }}
+  &nbsp;&mdash;&nbsp;
+  <span class="mono">{{ n_signals }}</span> signal{{ 's' if n_signals != 1 else '' }} generated
+  {% if universe_scored > 0 %}
+    / <span class="mono">{{ universe_scored }}</span> symbols scored
+  {% endif %}
+</p>
+
+{% if signals %}
+
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Direction</th>
+        <th>Entry Zone</th>
+        <th>Stop</th>
+        <th>Target</th>
+        <th>Confidence</th>
+        <th>Size (&#x20b9;)</th>
+        <th>Gap Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in signals %}
+      <tr>
+        <td><strong>{{ s.symbol }}</strong></td>
+
+        <td>
+          {% if s.direction == 'LONG' %}
+            <span class="badge badge-green">LONG &#x25b2;</span>
+          {% elif s.direction == 'SHORT' %}
+            <span class="badge badge-red">SHORT &#x25bc;</span>
+          {% else %}
+            <span class="badge badge-grey">{{ s.direction or '—' }}</span>
+          {% endif %}
+        </td>
+
+        <td>
+          {% if s.entry_low and s.entry_high %}
+            {{ "%.2f"|format(s.entry_low) }} – {{ "%.2f"|format(s.entry_high) }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+
+        <td class="neg">
+          {% if s.stop_loss %}{{ "%.2f"|format(s.stop_loss) }}{% else %}—{% endif %}
+        </td>
+
+        <td class="pos">
+          {% if s.target %}{{ "%.2f"|format(s.target) }}{% else %}—{% endif %}
+        </td>
+
+        <td>
+          {% if s.confidence %}
+            {% set conf_pct = (s.confidence * 100)|round(1) %}
+            {% if conf_pct >= 75 %}
+              <span class="badge badge-green">{{ conf_pct }}%</span>
+            {% elif conf_pct >= 60 %}
+              <span class="badge badge-blue">{{ conf_pct }}%</span>
+            {% else %}
+              <span class="badge badge-grey">{{ conf_pct }}%</span>
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+
+        <td>
+          {% if s.position_size %}&#x20b9;{{ "{:,.0f}".format(s.position_size) }}{% else %}—{% endif %}
+        </td>
+
+        <td>
+          {% set gs = s.gap_status or 'pending' %}
+          {% if gs == 'ok' %}
+            <span class="badge badge-green">ok</span>
+          {% elif gs == 'gapped_up_beyond_entry' %}
+            <span class="badge badge-orange">gapped up</span>
+          {% elif gs == 'gapped_down' %}
+            <span class="badge badge-red">gapped down</span>
+          {% else %}
+            <span class="badge badge-grey">pending</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
+
+<div class="alert-empty">
+  <div style="font-size:2rem;margin-bottom:0.5rem;">&#x26a0;</div>
+  <strong>No qualifying signals today — the gate held.</strong>
+  <div class="muted" style="margin-top:0.5rem;">
+    Either no symbols scored above the confidence threshold, or no signals were generated yet.<br>
+    Run <code>scripts/daily_run.py</code> after market close to populate signals.
+  </div>
+</div>
+
+{% endif %}
+
+<p class="muted" style="text-align:right;margin-top:0.5rem;">Last updated: {{ last_updated }}</p>
+{% endblock %}

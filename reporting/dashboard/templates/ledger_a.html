@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Ledger A{% endblock %}
+
+{% block content %}
+<h1>Ledger A — Virtual Portfolio</h1>
+<p class="subtitle">Autonomous benchmark: every qualifying signal acted on, no hesitation.</p>
+
+<!-- Metrics row -->
+<div class="metrics-row">
+  <div class="metric-card">
+    <div class="card-title">Current Equity</div>
+    <div class="card-value">{{ current_equity }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Sharpe Ratio</div>
+    <div class="card-value">{{ sharpe }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Max Drawdown</div>
+    <div class="card-value">{{ max_drawdown }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Hit Rate</div>
+    <div class="card-value">{{ hit_rate }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Open Positions</div>
+    <div class="card-value">{{ n_open }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Net P&amp;L (closed)</div>
+    <div class="card-value">{{ net_pnl }}</div>
+  </div>
+</div>
+
+<!-- Equity sparkline -->
+{% if sparkline_svg %}
+<div class="card" style="padding:1rem 1.5rem 0.75rem;">
+  <div class="card-title" style="margin-bottom:0.6rem;">Equity Curve</div>
+  {{ sparkline_svg | safe }}
+</div>
+{% else %}
+<div class="card">
+  <div class="card-title">Equity Curve</div>
+  <p class="muted" style="margin-top:0.4rem;">No closed trades yet — equity curve unavailable.</p>
+</div>
+{% endif %}
+
+<!-- Open positions -->
+<div class="section-header">
+  <h2>Open Positions</h2>
+  <span class="section-count">{{ open_positions | length }} position{{ 's' if open_positions | length != 1 else '' }}</span>
+</div>
+
+{% if open_positions | length > 0 %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Entry Date</th>
+        <th>Entry Price</th>
+        <th>Stop</th>
+        <th>Target</th>
+        <th>Unrealised P&amp;L</th>
+        <th>Days Held</th>
+        <th>Confidence</th>
+        <th>Sector</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pos in open_positions.itertuples() %}
+      <tr>
+        <td><strong>{{ pos.symbol }}</strong></td>
+        <td>{{ pos.entry_date.strftime('%d %b %Y') if pos.entry_date and pos.entry_date == pos.entry_date else '—' }}</td>
+        <td>{{ "%.2f"|format(pos.entry_price) if pos.entry_price == pos.entry_price else '—' }}</td>
+        <td class="neg">{{ "%.2f"|format(pos.stop_loss) if pos.stop_loss == pos.stop_loss else '—' }}</td>
+        <td class="pos">{{ "%.2f"|format(pos.target) if pos.target == pos.target else '—' }}</td>
+        <td class="muted">—</td>
+        <td>{{ pos.days_held if pos.days_held == pos.days_held else '—' }}</td>
+        <td>
+          {% if pos.confidence == pos.confidence %}
+            <span class="badge badge-blue">{{ "%.0f"|format(pos.confidence * 100) }}%</span>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td class="text-col">{{ pos.sector or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">No open positions.</p>
+{% endif %}
+
+<!-- Closed trades -->
+<div class="section-header">
+  <h2>Closed Trades</h2>
+  <span class="section-count">{{ total_closed }} total</span>
+</div>
+
+{% if total_closed > 0 %}
+
+<!-- Sort controls -->
+<div style="margin-bottom:0.75rem;font-size:0.85rem;color:var(--text-muted);">
+  Sort by:
+  {% set cols = [('exit_date','Date'), ('symbol','Symbol'), ('net_pnl','Net P&L'), ('exit_reason','Reason')] %}
+  {% for col_key, col_label in cols %}
+    {% set new_dir = 'asc' if (sort_by == col_key and sort_dir == 'desc') else 'desc' %}
+    <a href="{{ url_for('ledger_a', sort=col_key, dir=new_dir, page=1) }}"
+       style="color:{{ 'var(--accent)' if sort_by == col_key else 'var(--text-muted)' }};
+              text-decoration:none;margin:0 0.4rem;font-weight:{{ '600' if sort_by == col_key else '400' }};">
+      {{ col_label }}
+      {% if sort_by == col_key %}{{ '&#x25bc;' if sort_dir == 'desc' else '&#x25b2;' }}{% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Entry Date</th>
+        <th>Entry Price</th>
+        <th>Exit Date</th>
+        <th>Exit Price</th>
+        <th>Gross P&amp;L</th>
+        <th>Net P&amp;L</th>
+        <th>Reason</th>
+        <th>Confidence</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for trade in closed_trades.itertuples() %}
+      <tr>
+        <td><strong>{{ trade.symbol }}</strong></td>
+        <td>{{ trade.entry_date.strftime('%d %b %Y') if trade.entry_date and trade.entry_date == trade.entry_date else '—' }}</td>
+        <td>{{ "%.2f"|format(trade.entry_price) if trade.entry_price == trade.entry_price else '—' }}</td>
+        <td>{{ trade.exit_date.strftime('%d %b %Y') if trade.exit_date and trade.exit_date == trade.exit_date else '—' }}</td>
+        <td>{{ "%.2f"|format(trade.exit_price) if trade.exit_price == trade.exit_price else '—' }}</td>
+        <td class="{{ 'pos' if trade.gross_pnl and trade.gross_pnl > 0 else 'neg' }}">
+          &#x20b9;{{ "{:+,.0f}".format(trade.gross_pnl) if trade.gross_pnl == trade.gross_pnl else '—' }}
+        </td>
+        <td class="{{ 'pos' if trade.net_pnl and trade.net_pnl > 0 else 'neg' }}">
+          <strong>&#x20b9;{{ "{:+,.0f}".format(trade.net_pnl) if trade.net_pnl == trade.net_pnl else '—' }}</strong>
+        </td>
+        <td>
+          {% set r = trade.exit_reason or '' %}
+          {% if r == 'target' %}
+            <span class="badge badge-green">target</span>
+          {% elif r == 'stop_loss' %}
+            <span class="badge badge-red">stop loss</span>
+          {% elif r == 'max_hold' %}
+            <span class="badge badge-orange">max hold</span>
+          {% elif r %}
+            <span class="badge badge-grey">{{ r }}</span>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% if trade.confidence == trade.confidence %}
+            {{ "%.0f"|format(trade.confidence * 100) }}%
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}
+    <a href="{{ url_for('ledger_a', page=page-1, sort=sort_by, dir=sort_dir) }}">&laquo; Prev</a>
+  {% endif %}
+
+  {% for p in range(1, total_pages + 1) %}
+    {% if p == page %}
+      <span class="current">{{ p }}</span>
+    {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+      <a href="{{ url_for('ledger_a', page=p, sort=sort_by, dir=sort_dir) }}">{{ p }}</a>
+    {% elif p == page - 3 or p == page + 3 %}
+      <span class="ellipsis">…</span>
+    {% endif %}
+  {% endfor %}
+
+  {% if page < total_pages %}
+    <a href="{{ url_for('ledger_a', page=page+1, sort=sort_by, dir=sort_dir) }}">Next &raquo;</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<p class="muted">No closed trades yet.</p>
+{% endif %}
+
+{% endblock %}

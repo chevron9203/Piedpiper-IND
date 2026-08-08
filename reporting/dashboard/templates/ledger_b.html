@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Ledger B{% endblock %}
+
+{% block content %}
+<h1>Ledger B — Real Trades</h1>
+<p class="subtitle">Log what you actually traded or chose to pass on.</p>
+
+<!-- Quick-log form -->
+<div class="card">
+  <h2 style="margin-top:0;">Log a Real Trade</h2>
+  <form method="POST" action="{{ url_for('log_trade') }}">
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="symbol">Symbol</label>
+        <input type="text" id="symbol" name="symbol" placeholder="e.g. RELIANCE"
+               style="text-transform:uppercase;" required>
+      </div>
+      <div class="form-group">
+        <label for="fill_price">Fill Price (&#x20b9;)</label>
+        <input type="number" id="fill_price" name="fill_price" step="0.01" min="0.01" required>
+      </div>
+      <div class="form-group">
+        <label for="quantity">Quantity (shares)</label>
+        <input type="number" id="quantity" name="quantity" step="1" min="1" required>
+      </div>
+      <div class="form-group">
+        <label for="gtt_stop">GTT Stop (&#x20b9;)</label>
+        <input type="number" id="gtt_stop" name="gtt_stop" step="0.01" min="0.01" required>
+      </div>
+      <div class="form-group">
+        <label for="gtt_target">GTT Target (&#x20b9;)</label>
+        <input type="number" id="gtt_target" name="gtt_target" step="0.01" min="0.01" required>
+      </div>
+      <div class="form-group">
+        <label for="signal_date">Signal Date</label>
+        <input type="date" id="signal_date" name="signal_date" value="{{ run_date }}">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:1rem;">
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" name="notes" placeholder="e.g. Entered 5 min after open, gap up resolved"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Log Trade</button>
+  </form>
+</div>
+
+<!-- Mark as declined -->
+{% if pending_signals %}
+<div class="card">
+  <h2 style="margin-top:0;">Mark Signals as Declined</h2>
+  <p class="muted" style="margin-bottom:0.75rem;">
+    These are today's qualifying signals not yet logged or declined.
+  </p>
+  <form method="POST" action="{{ url_for('decline_signal') }}">
+    <input type="hidden" name="signal_date" value="{{ run_date }}">
+    <div class="table-wrapper" style="margin-bottom:0.75rem;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:2.5rem;"></th>
+            <th>Symbol</th>
+            <th>Direction</th>
+            <th>Entry Zone</th>
+            <th>Confidence</th>
+            <th>Stop</th>
+            <th>Target</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in pending_signals %}
+          <tr>
+            <td><input type="checkbox" name="symbol" value="{{ s.symbol }}"></td>
+            <td><strong>{{ s.symbol }}</strong></td>
+            <td>
+              {% if s.direction == 'LONG' %}
+                <span class="badge badge-green">LONG</span>
+              {% else %}
+                <span class="badge badge-grey">{{ s.direction or '—' }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if s.entry_low and s.entry_high %}
+                {{ "%.2f"|format(s.entry_low) }} – {{ "%.2f"|format(s.entry_high) }}
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if s.confidence %}
+                {{ "%.0f"|format(s.confidence * 100) }}%
+              {% else %}—{% endif %}
+            </td>
+            <td class="neg">
+              {% if s.stop_loss %}{{ "%.2f"|format(s.stop_loss) }}{% else %}—{% endif %}
+            </td>
+            <td class="pos">
+              {% if s.target %}{{ "%.2f"|format(s.target) }}{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-group" style="max-width:400px;margin-bottom:0.75rem;">
+      <label for="reason">Reason (applies to all checked)</label>
+      <input type="text" id="reason" name="reason" placeholder="e.g. Market uncertainty, position limit">
+    </div>
+    <button type="submit" class="btn btn-danger btn-sm">Mark Selected as Declined</button>
+  </form>
+</div>
+{% endif %}
+
+<!-- Open real trades -->
+<div class="section-header">
+  <h2>Open Real Trades</h2>
+  <span class="section-count">{{ open_trades | length }} position{{ 's' if open_trades | length != 1 else '' }}</span>
+</div>
+
+{% if open_trades | length > 0 %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Entry Date</th>
+        <th>Entry Price</th>
+        <th>Quantity</th>
+        <th>GTT Stop</th>
+        <th>GTT Target</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for trade in open_trades.itertuples() %}
+      <tr>
+        <td><strong>{{ trade.symbol }}</strong></td>
+        <td>{{ trade.entry_date.strftime('%d %b %Y') if trade.entry_date and trade.entry_date == trade.entry_date else '—' }}</td>
+        <td>{{ "%.2f"|format(trade.entry_price) if trade.entry_price == trade.entry_price else '—' }}</td>
+        <td>{{ trade.quantity if trade.quantity == trade.quantity else '—' }}</td>
+        <td class="neg">{{ "%.2f"|format(trade.gtt_stop) if trade.gtt_stop == trade.gtt_stop else '—' }}</td>
+        <td class="pos">{{ "%.2f"|format(trade.gtt_target) if trade.gtt_target == trade.gtt_target else '—' }}</td>
+        <td class="text-col muted">{{ trade.notes or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">No open real trades.</p>
+{% endif %}
+
+<!-- Closed real trades -->
+<div class="section-header">
+  <h2>Closed Real Trades</h2>
+  <span class="section-count">{{ closed_trades | length }} trade{{ 's' if closed_trades | length != 1 else '' }}</span>
+</div>
+
+{% if closed_trades | length > 0 %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Entry Date</th>
+        <th>Entry Price</th>
+        <th>Exit Date</th>
+        <th>Exit Price</th>
+        <th>Gross P&amp;L</th>
+        <th>Net P&amp;L</th>
+        <th>Reason</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for trade in closed_trades.itertuples() %}
+      <tr>
+        <td><strong>{{ trade.symbol }}</strong></td>
+        <td>{{ trade.entry_date.strftime('%d %b %Y') if trade.entry_date and trade.entry_date == trade.entry_date else '—' }}</td>
+        <td>{{ "%.2f"|format(trade.entry_price) if trade.entry_price == trade.entry_price else '—' }}</td>
+        <td>{{ trade.exit_date.strftime('%d %b %Y') if trade.exit_date and trade.exit_date == trade.exit_date else '—' }}</td>
+        <td>{{ "%.2f"|format(trade.exit_price) if trade.exit_price == trade.exit_price else '—' }}</td>
+        <td class="{{ 'pos' if trade.gross_pnl and trade.gross_pnl > 0 else 'neg' }}">
+          &#x20b9;{{ "{:+,.0f}".format(trade.gross_pnl) if trade.gross_pnl == trade.gross_pnl else '—' }}
+        </td>
+        <td class="{{ 'pos' if trade.net_pnl and trade.net_pnl > 0 else 'neg' }}">
+          <strong>&#x20b9;{{ "{:+,.0f}".format(trade.net_pnl) if trade.net_pnl == trade.net_pnl else '—' }}</strong>
+        </td>
+        <td>
+          {% set r = trade.exit_reason or '' %}
+          {% if r == 'gtt_target' or r == 'target' %}
+            <span class="badge badge-green">target</span>
+          {% elif r == 'gtt_stop' or r == 'stop_loss' %}
+            <span class="badge badge-red">stop</span>
+          {% elif r == 'manual' %}
+            <span class="badge badge-orange">manual</span>
+          {% elif r %}
+            <span class="badge badge-grey">{{ r }}</span>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td class="text-col muted">{{ trade.notes or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">No closed real trades yet.</p>
+{% endif %}
+
+{% endblock %}

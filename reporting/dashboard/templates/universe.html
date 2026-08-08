@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Universe &amp; Settings{% endblock %}
+
+{% block extra_head %}
+<style>
+  #universe-filter {
+    max-width: 320px;
+    margin-bottom: 0.75rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Universe &amp; Settings</h1>
+<p class="subtitle">Current screened universe and locked configuration parameters.</p>
+
+<!-- Active config -->
+<div class="card">
+  <h2 style="margin-top:0;">Active Configuration</h2>
+  <div class="table-wrapper" style="margin-bottom:0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key, val in config_items.items() %}
+        <tr>
+          <td class="text-col" style="color:var(--text-muted);">{{ key }}</td>
+          <td><strong>{{ val }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Universe table -->
+<div class="section-header">
+  <h2>Current Universe</h2>
+  <span class="section-count">{{ n_universe }} symbol{{ 's' if n_universe != 1 else '' }}</span>
+</div>
+
+{% if universe %}
+<!-- Client-side filter (no CDN, plain JS) -->
+<input
+  type="text"
+  id="universe-filter"
+  class="form-control"
+  placeholder="Filter by symbol or sector…"
+  style="font-size:0.9rem;padding:0.45rem 0.7rem;border:1px solid var(--border);
+         border-radius:4px;width:280px;font-family:var(--font-mono);"
+  oninput="filterUniverse(this.value)"
+>
+
+<div class="table-wrapper">
+  <table id="universe-table">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Sector</th>
+        <th>Avg Turnover (Cr)</th>
+        <th>In Index</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in universe %}
+      <tr>
+        <td><strong>{{ row.symbol or '—' }}</strong></td>
+        <td class="text-col">{{ row.sector or '—' }}</td>
+        <td>
+          {% if row.avg_turnover_cr is not none and row.avg_turnover_cr == row.avg_turnover_cr %}
+            &#x20b9;{{ "%.1f"|format(row.avg_turnover_cr) }} Cr
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td class="text-col">{{ row.in_index or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function filterUniverse(query) {
+  var q = query.toLowerCase();
+  var rows = document.querySelectorAll('#universe-table tbody tr');
+  rows.forEach(function(row) {
+    var text = row.textContent.toLowerCase();
+    row.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+  });
+}
+</script>
+
+{% else %}
+<div class="alert-empty">
+  <div style="font-size:2rem;margin-bottom:0.5rem;">&#x1f4cb;</div>
+  <strong>No universe cache found.</strong>
+  <div class="muted" style="margin-top:0.5rem;">
+    Run <code>python -c "from data.universe import get_universe; get_universe(force_refresh=True)"</code>
+    to populate the universe.
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

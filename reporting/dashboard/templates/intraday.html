@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Intraday ORB{% endblock %}
+
+{% block content %}
+<h1>Intraday ORB — Paper Trading</h1>
+<p class="subtitle">{{ run_date }} &nbsp;·&nbsp; Capital ₹{{ "{:,.0f}".format(capital) }} &nbsp;·&nbsp;
+  <span class="badge badge-orange">PAPER MODE</span>
+  &nbsp; No real orders placed &nbsp;·&nbsp; Opening range 9:15–9:30 &nbsp;·&nbsp; Auto SQO 3:15 PM
+</p>
+
+<!-- ── Day summary ── -->
+<div class="metrics-row">
+  <div class="metric-card">
+    <div class="card-title">Net P&L Today</div>
+    <div class="card-value {{ 'pos' if net_pnl >= 0 else 'neg' }}">
+      {{ "₹{:+,.0f}".format(net_pnl) }}
+    </div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Trades Today</div>
+    <div class="card-value">{{ trades_today }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Win / Loss</div>
+    <div class="card-value">{{ wins }} / {{ losses }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Charges</div>
+    <div class="card-value neg">{{ "₹{:,.0f}".format(total_charges) }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">All-Time Net P&L</div>
+    <div class="card-value {{ 'pos' if all_time_pnl >= 0 else 'neg' }}">
+      {{ "₹{:+,.0f}".format(all_time_pnl) }}
+    </div>
+  </div>
+  <div class="metric-card">
+    <div class="card-title">Total Trades</div>
+    <div class="card-value">{{ total_trades }}</div>
+  </div>
+</div>
+
+<!-- ── Today's trades ── -->
+<div class="section-header">
+  <h2>Today's Trades</h2>
+  <span class="section-count">{{ trades_today }} trade(s)</span>
+  {% if today_rows | selectattr('exit_price', 'none') | list %}
+  <form method="POST" action="/intraday/close-all" style="margin-left:auto;"
+        onsubmit="return confirm('Close ALL open positions at market price?')">
+    <button type="submit" class="btn btn-danger">Close All Now</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if today_rows %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Dir</th>
+        <th>Entry</th>
+        <th>SL</th>
+        <th>Target</th>
+        <th>Exit</th>
+        <th>Reason</th>
+        <th>Qty</th>
+        <th>Gross P&L</th>
+        <th>Charges</th>
+        <th>Net P&L</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in today_rows %}
+      <tr>
+        <td><strong>{{ t.symbol }}</strong></td>
+        <td><span class="badge badge-blue">{{ t.direction or 'LONG' }}</span></td>
+        <td>{{ "₹{:,.2f}".format(t.entry_price) if t.entry_price else "—" }}</td>
+        <td>{{ "₹{:,.2f}".format(t.stop_loss) if t.stop_loss else "—" }}</td>
+        <td>{{ "₹{:,.2f}".format(t.target) if t.target else "—" }}</td>
+        <td>{{ "₹{:,.2f}".format(t.exit_price) if t.exit_price else "—" }}</td>
+        <td>
+          {% if t.exit_reason == 'target' %}
+            <span class="badge badge-green">target</span>
+          {% elif t.exit_reason == 'stop' %}
+            <span class="badge badge-red">stop</span>
+          {% elif t.exit_reason == 'squareoff' %}
+            <span class="badge badge-orange">SQO</span>
+          {% elif t.exit_reason == 'manual' %}
+            <span class="badge badge-orange">manual</span>
+          {% else %}
+            <span class="badge badge-grey">open</span>
+          {% endif %}
+        </td>
+        <td>{{ t.qty or "—" }}</td>
+        <td class="{{ 'pos' if (t.gross_pnl or 0) >= 0 else 'neg' }}">
+          {{ "₹{:+,.0f}".format(t.gross_pnl) if t.gross_pnl is not none else "—" }}
+        </td>
+        <td class="neg">{{ "₹{:,.0f}".format(t.charges) if t.charges is not none else "—" }}</td>
+        <td class="{{ 'pos' if (t.net_pnl or 0) >= 0 else 'neg' }}">
+          <strong>{{ "₹{:+,.0f}".format(t.net_pnl) if t.net_pnl is not none else "open" }}</strong>
+        </td>
+        <td>
+          {% if t.exit_price %}
+            <span class="badge badge-grey">closed</span>
+          {% else %}
+            <span class="badge badge-blue">open</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if not t.exit_price %}
+          <form method="POST" action="/intraday/close/{{ t.symbol }}"
+                onsubmit="return confirm('Close {{ t.symbol }} at market price?')">
+            <button type="submit" class="btn-danger-sm">Close Now</button>
+          </form>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert-empty">
+  No trades today. Cron runs at 9:31 AM — check logs/intraday_run.log
+</div>
+{% endif %}
+
+<!-- ── Recent history ── -->
+{% if history_rows %}
+<div class="section-header">
+  <h2>Recent History</h2>
+  <span class="section-count">last 30 trades</span>
+</div>
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Symbol</th>
+        <th>Entry</th>
+        <th>Exit</th>
+        <th>Reason</th>
+        <th>Qty</th>
+        <th>Net P&L</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in history_rows %}
+      <tr>
+        <td>{{ t.trade_date }}</td>
+        <td><strong>{{ t.symbol }}</strong></td>
+        <td>{{ "₹{:,.2f}".format(t.entry_price) if t.entry_price else "—" }}</td>
+        <td>{{ "₹{:,.2f}".format(t.exit_price) if t.exit_price else "—" }}</td>
+        <td>
+          {% if t.exit_reason == 'target' %}<span class="badge badge-green">target</span>
+          {% elif t.exit_reason == 'stop' %}<span class="badge badge-red">stop</span>
+          {% elif t.exit_reason == 'squareoff' %}<span class="badge badge-orange">SQO</span>
+          {% else %}<span class="badge badge-grey">—</span>{% endif %}
+        </td>
+        <td>{{ t.qty }}</td>
+        <td class="{{ 'pos' if (t.net_pnl or 0) >= 0 else 'neg' }}">
+          <strong>{{ "₹{:+,.0f}".format(t.net_pnl) if t.net_pnl is not none else "open" }}</strong>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<p class="muted" style="margin-top:1.5rem;">
+  Auto-refresh every 60s &nbsp;·&nbsp;
+  Cron: 9:31 AM (signals) · every 15 min (monitor + trailing stop) · 3:10 PM (square-off) &nbsp;·&nbsp;
+  <a href="#" onclick="location.reload()">Refresh now</a>
+</p>
+
+<style>
+.btn-danger-sm { background:#e74c3c; color:#fff; border:none; border-radius:3px;
+                 padding:3px 9px; cursor:pointer; font-size:0.78rem; font-weight:600; }
+.btn-danger-sm:hover { background:#c0392b; }
+</style>
+
+<script>setTimeout(() => location.reload(), 60000);</script>
+{% endblock %}

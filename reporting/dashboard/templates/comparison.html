@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Comparison{% endblock %}
+
+{% block content %}
+<h1>Ledger A vs Ledger B</h1>
+<p class="subtitle">How your real trading compares to the autonomous benchmark.</p>
+
+<!-- Side-by-side summary -->
+<div class="compare-grid">
+  <div class="card">
+    <div class="card-title">Ledger A — Virtual (Benchmark)</div>
+    <div style="margin-top:0.75rem;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+        <span class="muted">Equity</span>
+        <span class="mono" style="font-size:1.1rem;font-weight:700;">{{ la_equity }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+        <span class="muted">Sharpe</span>
+        <span class="mono">{{ la_sharpe }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;">
+        <span class="muted">Closed Trades</span>
+        <span class="mono">{{ la_trades }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Ledger B — Real (Yours)</div>
+    <div style="margin-top:0.75rem;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+        <span class="muted">Cumulative P&amp;L</span>
+        <span class="mono" style="font-size:1.1rem;font-weight:700;">{{ lb_net_pnl }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+        <span class="muted">Sharpe</span>
+        <span class="mono">—</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;">
+        <span class="muted">Closed Trades</span>
+        <span class="mono">{{ lb_trades }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Net alpha -->
+<div class="card" style="text-align:center;">
+  <div class="card-title">Net Alpha (B &minus; A)</div>
+  <div class="card-value {{ 'pos' if net_alpha_sign == 'positive' else 'neg' }}" style="font-size:2rem;margin-top:0.3rem;">
+    {{ net_alpha }}
+  </div>
+  <p class="muted" style="margin-top:0.5rem;">
+    {% if net_alpha_sign == 'positive' %}
+      B outperformed the benchmark — your discretion added value.
+    {% else %}
+      B underperformed the benchmark — the model knew better on net.
+    {% endif %}
+  </p>
+</div>
+
+<!-- Signals A took but B declined -->
+<div class="section-header">
+  <h2>Signals A Took but B Declined</h2>
+  <span class="section-count">{{ a_not_b | length }} trade{{ 's' if a_not_b | length != 1 else '' }}</span>
+</div>
+<p class="muted" style="margin-bottom:0.75rem;">
+  Key for understanding what your discretion cost (or saved).
+</p>
+
+{% if a_not_b %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>A Entry Date</th>
+        <th>A Entry Price</th>
+        <th>A Exit Date</th>
+        <th>A Exit Price</th>
+        <th>A Gross P&amp;L</th>
+        <th>A Net P&amp;L</th>
+        <th>A Reason</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in a_not_b %}
+      <tr>
+        <td><strong>{{ t.symbol }}</strong></td>
+        <td>{{ t.entry_date | string | truncate(10, True, '') if t.entry_date else '—' }}</td>
+        <td>{{ "%.2f"|format(t.entry_price) if t.entry_price else '—' }}</td>
+        <td>{{ t.exit_date | string | truncate(10, True, '') if t.exit_date else '—' }}</td>
+        <td>{{ "%.2f"|format(t.exit_price) if t.exit_price else '—' }}</td>
+        <td class="{{ 'pos' if t.gross_pnl and t.gross_pnl > 0 else 'neg' }}">
+          {% if t.gross_pnl %}&#x20b9;{{ "{:+,.0f}".format(t.gross_pnl) }}{% else %}—{% endif %}
+        </td>
+        <td class="{{ 'pos' if t.net_pnl and t.net_pnl > 0 else 'neg' }}">
+          {% if t.net_pnl %}<strong>&#x20b9;{{ "{:+,.0f}".format(t.net_pnl) }}</strong>{% else %}—{% endif %}
+        </td>
+        <td>
+          {% set r = t.exit_reason or '' %}
+          {% if r == 'target' %}<span class="badge badge-green">target</span>
+          {% elif r == 'stop_loss' %}<span class="badge badge-red">stop</span>
+          {% elif r %}<span class="badge badge-grey">{{ r }}</span>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">None — either no declined signals match closed A trades, or no data yet.</p>
+{% endif %}
+
+<!-- Matched trades -->
+<div class="section-header">
+  <h2>Matched Trades (same symbol in both)</h2>
+  <span class="section-count">{{ matched_trades | length }}</span>
+</div>
+
+{% if matched_trades %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>A Entry Price</th>
+        <th>B Fill Price</th>
+        <th>Fill Diff</th>
+        <th>A Net P&amp;L</th>
+        <th>B Net P&amp;L</th>
+        <th>P&amp;L Diff</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in matched_trades %}
+      <tr>
+        <td><strong>{{ t.symbol }}</strong></td>
+        <td>{{ "%.2f"|format(t.a_entry) if t.a_entry else '—' }}</td>
+        <td>{{ "%.2f"|format(t.b_entry) if t.b_entry else '—' }}</td>
+        <td class="{{ 'neg' if t.fill_diff and t.fill_diff > 0 else 'pos' }}">
+          {% if t.fill_diff is not none %}
+            {{ "{:+.2f}".format(t.fill_diff) }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="{{ 'pos' if t.a_net_pnl and t.a_net_pnl > 0 else 'neg' }}">
+          {% if t.a_net_pnl %}&#x20b9;{{ "{:+,.0f}".format(t.a_net_pnl) }}{% else %}—{% endif %}
+        </td>
+        <td class="{{ 'pos' if t.b_net_pnl and t.b_net_pnl > 0 else 'neg' }}">
+          {% if t.b_net_pnl %}&#x20b9;{{ "{:+,.0f}".format(t.b_net_pnl) }}{% else %}—{% endif %}
+        </td>
+        <td class="{{ 'pos' if t.pnl_diff and t.pnl_diff > 0 else 'neg' }}">
+          {% if t.pnl_diff is not none %}&#x20b9;{{ "{:+,.0f}".format(t.pnl_diff) }}{% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">No matched trades yet.</p>
+{% endif %}
+
+{% endblock %}
