@@ -7,8 +7,8 @@ What it does:
   3. Logs the signal to logs/monthly_run/
 
 Cron line (run at 6:00 PM IST; self-guards against non-last-trading-day runs):
-  Mac (system timezone = IST):  0 18 * * 1-5 .../python3 .../monthly_run.py --capital 100000
-  Cloud VM (UTC timezone):      30 12 * * 1-5 .../python3 .../monthly_run.py --capital 100000
+  Mac (system timezone = IST):  0 18 * * 1-5 .../python3 .../monthly_run.py --capital 300000
+  Cloud VM (UTC timezone):      30 12 * * 1-5 .../python3 .../monthly_run.py --capital 300000
 
 Test run (skip last-trading-day guard, skip notifications):
   python scripts/monthly_run.py --force --no-notify --capital 100000
@@ -74,11 +74,24 @@ def _format_telegram_msg(sig: dict, current_holdings: list[str] | None, capital:
 
     if not sig["in_market"]:
         if def_mode == "gold":
-            lines.append("\n_Move to GOLDBEES (gold ETF). Re-check next month-end._")
+            goldbees_units = int(capital / 100)  # approximate at ~₹100/unit
+            lines.append(f"\n*ACTION: Move to GOLDBEES*")
+            lines.append(f"BUY ~{goldbees_units} units of GOLDBEES (NSE ETF) at market open")
+            lines.append(f"Amount: ₹{capital:,.0f}  |  Re-check next month-end.")
         elif def_mode == "split":
-            lines.append("\n_50% GOLDBEES + 50% liquid fund. Re-check next month-end._")
+            goldbees_units = int(capital * 0.5 / 100)
+            liquidbees_units = int(capital * 0.5 / 1000)  # LIQUIDBEES ~₹1000/unit
+            lines.append(f"\n*ACTION: Split defensive*")
+            lines.append(f"BUY ~{goldbees_units} units GOLDBEES  (₹{capital*0.5:,.0f})")
+            lines.append(f"BUY ~{liquidbees_units} units LIQUIDBEES  (₹{capital*0.5:,.0f})")
+            lines.append(f"Re-check next month-end.")
         else:
-            lines.append("\n_Stay in cash / liquid fund (Gold also bearish). Re-check next month-end._")
+            # Both equity AND gold bearish — park entirely in LIQUIDBEES
+            liquidbees_units = int(capital / 1000)  # LIQUIDBEES ~₹1000/unit
+            lines.append(f"\n*ACTION: Move to LIQUIDBEES (liquid ETF)*")
+            lines.append(f"BUY ~{liquidbees_units} units of LIQUIDBEES (NSE: LIQUIDBEES) at market open")
+            lines.append(f"Amount: ₹{capital:,.0f}  |  Earns ~6.5% p.a. (overnight rate)")
+            lines.append(f"Re-check next month-end. Both equity and gold are bearish.")
         return "\n".join(lines)
 
     target  = sig["target"]
@@ -93,11 +106,16 @@ def _format_telegram_msg(sig: dict, current_holdings: list[str] | None, capital:
         lines.append(f"  {sym}: {w*100:.0f}%  ₹{alloc:,.0f}  ({m.get('score_12m',0)*100:+.0f}% 12m)")
 
     if current_holdings is not None:
+        # LIQUIDBEES/GOLDBEES held defensively must be sold when re-entering market
+        defensive_etfs = {"LIQUIDBEES", "GOLDBEES"}
         to_sell = [s for s in current_holdings if s not in target]
         to_buy  = [s for s in target if s not in current_holdings]
         hold    = [s for s in target if s in current_holdings]
-        if to_sell: lines.append(f"\n*SELL:* {', '.join(to_sell)}")
-        if to_buy:  lines.append(f"*BUY:*  {', '.join(to_buy)}")
+        etf_exits = [s for s in to_sell if s in defensive_etfs]
+        stock_exits = [s for s in to_sell if s not in defensive_etfs]
+        if etf_exits:   lines.append(f"\n*SELL (defensive ETF exit):* {', '.join(etf_exits)}")
+        if stock_exits: lines.append(f"*SELL:* {', '.join(stock_exits)}")
+        if to_buy:      lines.append(f"*BUY:*  {', '.join(to_buy)}")
         if hold:    lines.append(f"*HOLD:* {', '.join(hold)}")
     else:
         lines.append(f"\n*BUY ALL:* {', '.join(target)}")
@@ -108,8 +126,8 @@ def _format_telegram_msg(sig: dict, current_holdings: list[str] | None, capital:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Monthly momentum auto-runner")
-    ap.add_argument("--capital",  type=float, default=settings.STARTING_VIRTUAL_CAPITAL,
-                    help="Current portfolio value for allocation display")
+    ap.add_argument("--capital",  type=float, default=300_000.0,
+                    help="Current portfolio value for allocation display (default ₹3L momentum allocation)")
     ap.add_argument("--holdings", type=str, default="",
                     help="Comma-separated current holdings for buy/sell diff")
     ap.add_argument("--force",    action="store_true",
@@ -199,6 +217,7 @@ def main() -> None:
         sector_map=sector_map,
         as_of=as_of,
         gold_close=gold_close,
+        composite_score=True,
     )
 
     current_holdings = [s.strip() for s in args.holdings.split(",") if s.strip()] or None
@@ -212,6 +231,9 @@ def main() -> None:
 
     # Persist signal to DuckDB for paper performance tracking
     _log_monthly_signal(sig, current_holdings, args.capital)
+
+    # Save entry prices so live_orb.py can run per-stock stop-loss
+    _log_entry_prices(sig, args.capital)
 
     logger.info("Monthly run complete.")
 
@@ -232,6 +254,7 @@ def _log_monthly_signal(sig: dict, holdings: list[str] | None, capital: float) -
             "gold_6m_ret":   round(float(sig.get("gold_6m_ret", float("nan")) or float("nan")), 4)
                              if sig.get("gold_6m_ret") == sig.get("gold_6m_ret") else None,
             "target":        json.dumps(sig.get("target", [])),
+            "watchlist":     json.dumps(sig.get("watchlist", [])),
             "weights":       json.dumps({k: round(v, 4) for k, v in (sig.get("weights") or {}).items()}),
             "prior_holdings": json.dumps(holdings or []),
             "capital":       capital,
@@ -246,6 +269,7 @@ def _log_monthly_signal(sig: dict, holdings: list[str] | None, capital: float) -
                     nifty_6m_ret  DOUBLE,
                     gold_6m_ret   DOUBLE,
                     target        VARCHAR,
+                    watchlist     VARCHAR,
                     weights       VARCHAR,
                     prior_holdings VARCHAR,
                     capital       DOUBLE,
@@ -253,17 +277,91 @@ def _log_monthly_signal(sig: dict, holdings: list[str] | None, capital: float) -
                 )
             """)
             conn.execute("""
-                INSERT INTO monthly_signals VALUES (?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO monthly_signals VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT (signal_date) DO UPDATE SET
                     in_market=excluded.in_market, defensive_mode=excluded.defensive_mode,
                     nifty_6m_ret=excluded.nifty_6m_ret, gold_6m_ret=excluded.gold_6m_ret,
-                    target=excluded.target, weights=excluded.weights,
+                    target=excluded.target, watchlist=excluded.watchlist,
+                    weights=excluded.weights,
                     prior_holdings=excluded.prior_holdings, capital=excluded.capital,
                     logged_at=excluded.logged_at
             """, list(record.values()))
         logger.info("Monthly signal logged to DB for {}", as_of_str)
     except Exception as exc:
         logger.warning("Could not log monthly signal to DB: {}", exc)
+
+
+def _log_entry_prices(sig: dict, capital: float) -> None:
+    """
+    Save entry prices for the new momentum portfolio to momentum_entries table.
+    Uses today's closing price as the proxy for tomorrow's execution price.
+    Called immediately after month-end signal (market already closed at 6 PM).
+    live_orb.py reads this table to run smart per-stock stop-loss.
+    """
+    if not sig.get("in_market") or not sig.get("target"):
+        logger.info("Defensive mode — no entry prices to log")
+        return
+
+    import json
+    target  = sig["target"]
+    weights = sig.get("weights") or {}
+    as_of   = sig["as_of"]
+    as_of_str = as_of.strftime("%Y-%m-%d") if hasattr(as_of, "strftime") else str(as_of)
+
+    try:
+        with store.db_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS momentum_entries (
+                    signal_date  VARCHAR,
+                    symbol       VARCHAR,
+                    entry_price  DOUBLE,
+                    weight       DOUBLE,
+                    qty          INTEGER,
+                    hard_stop    DOUBLE,
+                    capital      DOUBLE,
+                    logged_at    VARCHAR,
+                    PRIMARY KEY (signal_date, symbol)
+                )
+            """)
+
+            # Latest close on or before signal date, per symbol
+            rows = conn.execute("""
+                SELECT a.symbol, a.close
+                FROM adjusted_ohlcv a
+                INNER JOIN (
+                    SELECT symbol, MAX(dt) AS max_dt
+                    FROM adjusted_ohlcv
+                    WHERE symbol = ANY(?) AND dt <= ?
+                    GROUP BY symbol
+                ) b ON a.symbol = b.symbol AND a.dt = b.max_dt
+            """, [target, as_of_str]).fetchall()
+
+        price_map = {r[0]: float(r[1]) for r in rows}
+        missing   = [s for s in target if s not in price_map]
+        if missing:
+            logger.warning("No closing price found for: {}", missing)
+
+        with store.db_conn() as conn:
+            for sym in target:
+                price = price_map.get(sym)
+                if not price or price <= 0:
+                    continue
+                w         = float(weights.get(sym, 1.0 / len(target)))
+                qty       = max(1, int((capital * w) / price))
+                hard_stop = round(price * 0.85, 2)   # -15% absolute floor
+                conn.execute("""
+                    INSERT INTO momentum_entries VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT (signal_date, symbol) DO UPDATE SET
+                        entry_price=excluded.entry_price, weight=excluded.weight,
+                        qty=excluded.qty, hard_stop=excluded.hard_stop,
+                        capital=excluded.capital, logged_at=excluded.logged_at
+                """, [as_of_str, sym, price, w, qty, hard_stop, capital,
+                      pd.Timestamp.now().isoformat()])
+
+        logger.info("Entry prices saved for {}/{} stocks (signal_date={})",
+                    len(price_map), len(target), as_of_str)
+    except Exception as exc:
+        logger.warning("Could not log entry prices: {}", exc)
 
 
 if __name__ == "__main__":

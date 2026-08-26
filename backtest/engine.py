@@ -723,34 +723,25 @@ class BacktestEngine:
         use_gross: bool,
     ) -> pd.Series:
         """
-        Reconstruct an alternative equity curve based purely on gross or net P&L,
-        starting from start_capital and adjusting daily when trades close.
-        Used to compute separate gross vs net metrics.
+        base_eq is the GROSS equity curve (cash accounting never deducts costs on exit).
+        Gross  → return base_eq as-is.
+        Net    → subtract cumulative costs on each exit date so they propagate forward.
         """
-        if trades_df.empty:
+        if trades_df.empty or use_gross:
             return base_eq.copy()
 
-        col = "gross_pnl" if use_gross else "net_pnl"
-        pnl_col = "net_pnl" if not use_gross else "gross_pnl"
-        diff_col = "gross_pnl" if use_gross else "net_pnl"
-
-        # Daily summed P&L difference (gross vs net = cost) per exit date
         trades_copy = trades_df.copy()
         trades_copy["exit_date"] = pd.to_datetime(trades_copy["exit_date"])
+        trades_copy["costs"] = (
+            trades_copy["gross_pnl"].fillna(0) - trades_copy["net_pnl"].fillna(0)
+        )
+        daily_costs = trades_copy.groupby("exit_date")["costs"].sum()
 
-        # Build adjustment: cost savings (gross - net = costs)
-        if use_gross:
-            trades_copy["adj"] = trades_copy["gross_pnl"] - trades_copy["net_pnl"]
-        else:
-            trades_copy["adj"] = 0.0  # net is already the real curve
-
-        daily_adj = trades_copy.groupby("exit_date")["adj"].sum()
         result = base_eq.copy()
-        for date, adj in daily_adj.items():
-            dt = pd.Timestamp(date)
+        for exit_dt, cost in daily_costs.items():
+            dt = pd.Timestamp(exit_dt)
             if dt in result.index:
-                # Add back costs to get gross equity
-                result.loc[dt:] += adj
+                result.loc[dt:] -= cost
         return result
 
     def _empty_result(self) -> dict:

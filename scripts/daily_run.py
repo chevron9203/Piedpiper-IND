@@ -32,6 +32,16 @@ from datetime import date, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+# ── DISABLED ─────────────────────────────────────────────────────────────────
+# The LightGBM ML swing model has been confirmed loss-making in OOS backtesting
+# (TP hit rate 29% vs 44% breakeven; net P&L negative after costs).
+# Do NOT re-enable without a new backtest showing profitability.
+# Last reviewed: 2026-08-26
+if True:
+    print("daily_run.py is disabled — ML swing model is net-negative. See backtest results.")
+    sys.exit(0)
+# ─────────────────────────────────────────────────────────────────────────────
+
 from loguru import logger
 
 # ---------------------------------------------------------------------------

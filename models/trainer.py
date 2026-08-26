@@ -44,7 +44,7 @@ LGB_PARAMS: dict = {
     "colsample_bytree": 0.8,
     "reg_alpha": 0.1,
     "reg_lambda": 0.1,
-    "verbose": -1,
+    "verbosity": -1,
 }
 
 # Columns that must never be fed as model features

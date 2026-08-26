@@ -43,6 +43,8 @@ MAX_SECTOR          = 3
 MAX_MOM_CAP         = 0.80
 REQUIRE_NIFTY_200EMA = True     # go to GOLDBEES when Nifty < 200d EMA
 DEFENSIVE_MODE      = "gold"    # park cash in GOLDBEES (IS+18.8%/OOS+31.5% vs cash IS+9.1%)
+WATCHLIST_N     = 25      # wider candidate pool for mid-month entries
+COMPOSITE       = True    # weighted 12m×0.4 + 6m×0.3 + 3m×0.2 + 1m×0.1
 
 
 def _load_adjusted_ohlcv_all(from_dt: date, to_dt: date) -> dict[str, pd.DataFrame]:
@@ -92,6 +94,7 @@ def compute_signals(
     require_nifty_200ema: bool = REQUIRE_NIFTY_200EMA,
     defensive_mode: str = DEFENSIVE_MODE,
     gold_close: pd.Series | None = None,   # GOLDBEES/gold price for cash-fallback
+    composite_score: bool = COMPOSITE,
 ) -> dict:
     """Compute the month-end signal for the forward test."""
 
@@ -175,8 +178,21 @@ def compute_signals(
                 if price_now < ema200[sym]:
                     continue
 
-            price_past = float(hist.iloc[-(lookback_bdays - skip_bdays + 1)])
-            score = price_now / price_past - 1.0
+            if composite_score:
+                # Need 231 bars minimum (12m window - 1m skip = 231 bdays)
+                if len(hist) < 241:
+                    continue
+                r12 = price_now / float(hist.iloc[-231]) - 1.0   # 12m minus 1m skip
+                r6  = price_now / float(hist.iloc[-105]) - 1.0   # 6m minus 1m skip
+                r3  = price_now / float(hist.iloc[-42])  - 1.0   # 3m minus 1m skip
+                r1  = price_now / float(hist.iloc[-21])  - 1.0   # 1m (no skip)
+                score = 0.4*r12 + 0.3*r6 + 0.2*r3 + 0.1*r1
+            else:
+                r12   = price_now / float(hist.iloc[-(lookback_bdays - skip_bdays + 1)]) - 1.0
+                score = r12
+                r6    = price_now / float(hist.iloc[-105]) - 1.0 if len(hist) >= 105 else float("nan")
+                r3    = price_now / float(hist.iloc[-42])  - 1.0 if len(hist) >= 42  else float("nan")
+                r1    = price_now / float(hist.iloc[-21])  - 1.0 if len(hist) >= 21  else float("nan")
             if score > max_mom_cap:
                 continue
 
@@ -184,10 +200,10 @@ def compute_signals(
             daily_returns = hist.tail(22).pct_change().dropna()
             inv_vols[sym] = max(float(daily_returns.std()), 0.001)
 
-            # 1m, 3m, 6m returns for display
-            ret_1m  = price_now / float(hist.iloc[-22]) - 1.0  if len(hist) >= 22  else np.nan
-            ret_3m  = price_now / float(hist.iloc[-63]) - 1.0  if len(hist) >= 63  else np.nan
-            ret_6m  = price_now / float(hist.iloc[-126]) - 1.0 if len(hist) >= 126 else np.nan
+            # 1m, 3m, 6m returns for display (already computed above for composite score)
+            ret_1m = r1
+            ret_3m = r3
+            ret_6m = r6
 
             scores[sym] = score
             meta[sym]   = {"price": price_now, "score_12m": score,
@@ -208,6 +224,19 @@ def compute_signals(
                 break
     else:
         target_syms = []
+
+    # ── Watchlist: top-25 with relaxed sector cap (for daily entry triggers) ──
+    watchlist_syms: list[str] = []
+    if in_market and scores:
+        wl_sector_count: dict[str, int] = {}
+        for sym, sc in ranked:
+            sec = sector_map.get(sym, "Other")
+            if wl_sector_count.get(sec, 0) >= 5:   # relaxed cap: 5 per sector
+                continue
+            watchlist_syms.append(sym)
+            wl_sector_count[sec] = wl_sector_count.get(sec, 0) + 1
+            if len(watchlist_syms) >= WATCHLIST_N:
+                break
 
     # Compute inv-vol weights for the final target
     if target_syms and inv_vols:
@@ -233,6 +262,7 @@ def compute_signals(
         "weights": weights,
         "meta": meta,
         "all_scores": scores,
+        "watchlist": watchlist_syms,
         "defensive_mode": effective_defensive,
     }
 
@@ -319,6 +349,16 @@ def print_report(sig: dict, current_holdings: list[str] | None = None, capital: 
     for i, (sym, sc) in enumerate(ranked_all, 1):
         marker = "✓" if sym in target else " "
         print(f"  {i:>3}{marker} {sym:<14} {sc*100:>7.1f}%")
+
+    # Watchlist: stocks 11-25 available for mid-month entry
+    watchlist = sig.get("watchlist", [])
+    extra = [s for s in watchlist if s not in target]
+    if extra:
+        print(f"  WATCHLIST (mid-month entry candidates, #{len(target)+1}–{len(watchlist)}):")
+        for sym in extra:
+            m = sig.get("meta", {}).get(sym, {})
+            print(f"    {sym:<14} {m.get('score_12m', 0)*100:>7.1f}% 12m")
+        print()
 
     print(f"\n{'='*70}\n")
 

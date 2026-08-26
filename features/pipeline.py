@@ -8,7 +8,6 @@ from features.price_action import (
     upper_wick_ratio,
     lower_wick_ratio,
     rolling_high_low_position,
-    high52w_ratio,
 )
 from features.volatility import atr, realized_vol, vol_of_vol
 from features.volume import volume_ratio, obv, price_volume_divergence, vwap_deviation

@@ -225,6 +225,10 @@ def run_monthly_momentum(
     defensive_mode: str = "cash",       # "cash" | "gold" | "liquid" | "split"
     gold_close: pd.Series | None = None, # GOLDBEES.NS daily close for gold mode
     liquid_rate: float = 0.065,          # annualized return for liquid ETF simulation
+    # Dynamic intra-month management
+    dynamic_exits: bool = False,          # if True: check trailing stop + EMA21 between rebalances
+    trail_pct: float = 0.15,             # trailing stop: 15% below 30-day high
+    ema_break_span: int = 21,            # EMA span for breakdown detection
 ) -> tuple[pd.Series, list[dict]]:
     """
     Run monthly momentum rotation backtest.
@@ -269,6 +273,7 @@ def run_monthly_momentum(
     equity = start_capital
     cash   = start_capital
     holdings: dict[str, int] = {}   # symbol → qty held
+    _entry_prices: dict[str, float] = {}
     equity_curve: list[tuple] = []
     rebalances:   list[dict]  = []
 
@@ -294,6 +299,49 @@ def run_monthly_momentum(
 
     for i, reb_date in enumerate(rebal_dates):
         reb_ts = pd.Timestamp(reb_date)
+
+        # ── Dynamic intra-month exit check (if enabled) ───────────────────────
+        if dynamic_exits and holdings and i > 0:
+            prev_reb_ts = pd.Timestamp(rebal_dates[i - 1])
+            for sym in list(holdings.keys()):
+                sym_df = ohlcv_dict.get(sym)
+                if sym_df is None:
+                    continue
+                # Get daily bars between previous rebalance and this one
+                window = sym_df[(sym_df.index > prev_reb_ts) & (sym_df.index < reb_ts)]
+                if window.empty:
+                    continue
+                entry_px = _entry_prices.get(sym, 0)
+                ema_ser  = sym_df["close"].ewm(span=ema_break_span, adjust=False).mean()
+                prev_below = False
+                for ts, bar in window.iterrows():
+                    close = float(bar["close"])
+                    # Hard floor: -15% from entry
+                    if entry_px > 0 and close <= entry_px * 0.85:
+                        qty = holdings.pop(sym)
+                        value = qty * close
+                        cash += value - _trade_cost(value, "sell")
+                        _entry_prices.pop(sym, None)
+                        break
+                    # Trailing stop: close < 30-day rolling high × (1 - trail_pct)
+                    roll_high = float(sym_df.loc[:ts, "high"].tail(22).max())
+                    trail_stop_px = roll_high * (1 - trail_pct)
+                    if close <= trail_stop_px:
+                        qty = holdings.pop(sym)
+                        value = qty * close
+                        cash += value - _trade_cost(value, "sell")
+                        _entry_prices.pop(sym, None)
+                        break
+                    # EMA21 breakdown: 2 consecutive days below EMA21
+                    ema_val = float(ema_ser.loc[ts]) if ts in ema_ser.index else close
+                    today_below = close < ema_val
+                    if today_below and prev_below:
+                        qty = holdings.pop(sym)
+                        value = qty * close
+                        cash += value - _trade_cost(value, "sell")
+                        _entry_prices.pop(sym, None)
+                        break
+                    prev_below = today_below
 
         # Current prices at rebalance
         prices = close_wide.loc[:reb_ts].iloc[-1].dropna()
@@ -493,6 +541,8 @@ def run_monthly_momentum(
                     if cash >= value + cost:
                         cash -= value + cost
                         holdings[sym] = current_qty + qty_add
+                        if sym not in _entry_prices:
+                            _entry_prices[sym] = p
                         buy_log.append({"sym": sym, "qty": qty_add, "price": p, "value": value, "cost": cost})
             elif diff_value < -500:  # trim if overweight
                 qty_trim = int(abs(diff_value) / p)
@@ -703,6 +753,8 @@ def main() -> None:
                          "split (50%% gold + 50%% liquid)")
     ap.add_argument("--liquid-rate",   type=float, default=0.065,
                     help="Annual return to model for liquid ETF (default 0.065 = 6.5%%)")
+    ap.add_argument("--dynamic", action="store_true",
+                    help="Enable dynamic intra-month trailing stop + EMA21 exit simulation")
     args = ap.parse_args()
 
     from_dt = date(args.from_year, 1, 1)
@@ -768,6 +820,7 @@ def main() -> None:
         top_sectors_n=args.top_sectors,
         vix_reduce=args.vix_reduce,
         vix_exit=args.vix_exit,
+        dynamic_exits=args.dynamic,
     )
 
     enhancements = []
