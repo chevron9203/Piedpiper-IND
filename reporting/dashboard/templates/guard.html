@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Daily Guard{% endblock %}
+
+{% block content %}
+<h1>Daily Guard</h1>
+<p class="subtitle">
+  {{ today }} &nbsp;·&nbsp;
+  Runs at 4:35 PM daily &nbsp;·&nbsp;
+  <span class="badge badge-orange">PAPER MODE</span>
+</p>
+
+<!-- ── 3 tiles ── -->
+<div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
+
+  <!-- Regime -->
+  <div class="metric-card">
+    <div class="card-title">Market Regime</div>
+    {% if regime.is_bull is none %}
+      <div class="card-value" style="color:var(--text-muted);">—</div>
+      <div class="muted">No data</div>
+    {% elif regime.is_bull %}
+      <div class="card-value" style="color:var(--green);">BULL &#x25b2;</div>
+      <div class="muted" style="margin-top:0.25rem;">
+        Nifty {{ "+{:.1f}%".format(regime.nifty_vs_ema_pct) if regime.nifty_vs_ema_pct is not none else "—" }} above EMA200
+      </div>
+    {% else %}
+      <div class="card-value" style="color:var(--red);">BEAR &#x25bc;</div>
+      <div class="muted" style="margin-top:0.25rem;">
+        Nifty {{ "{:.1f}%".format(regime.nifty_vs_ema_pct) if regime.nifty_vs_ema_pct is not none else "—" }} below EMA200
+      </div>
+    {% endif %}
+    {% if regime.nifty_close %}
+    <div class="muted" style="font-size:0.78rem;margin-top:0.2rem;">
+      Nifty &#x20b9;{{ "{:,.0f}".format(regime.nifty_close) }}
+    </div>
+    {% endif %}
+    <div class="muted" style="font-size:0.78rem;margin-top:0.3rem;">
+      Note: Regime is alert-only. Exits triggered by monthly rebalance.
+    </div>
+  </div>
+
+  <!-- VIX -->
+  <div class="metric-card">
+    <div class="card-title">India VIX</div>
+    {% if regime.vix is not none %}
+      <div class="card-value {{ 'neg' if regime.vix >= 35 else '' }}">
+        {{ "{:.1f}".format(regime.vix) }}
+      </div>
+      <div style="margin-top:0.25rem;">
+        <span class="badge {{ vix_badge }}">{{ vix_label }}</span>
+        {% if regime.vix >= 35 %}
+          <span class="badge badge-red" style="margin-left:0.4rem;">&#x26a0; Emergency exit trigger!</span>
+        {% endif %}
+      </div>
+      <div class="muted" style="font-size:0.78rem;margin-top:0.3rem;">
+        Threshold: VIX &gt; 35 → exit all positions
+      </div>
+    {% else %}
+      <div class="card-value" style="color:var(--text-muted);">—</div>
+      <div class="muted">No data</div>
+    {% endif %}
+  </div>
+
+  <!-- Last Guard Run -->
+  <div class="metric-card">
+    <div class="card-title">Last Guard Run</div>
+    {% if last_guard_run %}
+      <div class="card-value" style="font-size:1rem;">
+        {{ last_guard_run[:19] if last_guard_run else "—" }}
+      </div>
+      <div class="muted" style="margin-top:0.25rem;">From momentum_daily_decisions</div>
+    {% else %}
+      <div class="card-value" style="color:var(--text-muted);">No runs yet</div>
+      <div class="muted" style="margin-top:0.25rem;">Guard runs daily at 4:35 PM</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ── Guard logic explainer ── -->
+<div style="background:#f5f5f0;border:1px solid var(--border);border-radius:6px;
+            padding:0.75rem 1.25rem;margin-bottom:1.5rem;color:var(--text-muted);font-size:0.83rem;">
+  <strong>Guard logic:</strong>
+  Checks daily at 4:35 PM:
+  (1) VIX &gt; 35 → emergency exit all positions immediately.
+  (2) Any holding is &minus;15% from entry price → exit that individual stock.
+  Regime change (Nifty vs EMA200) is shown as an alert only — full portfolio exit
+  is handled by the monthly rebalance.
+</div>
+
+<!-- ── Decision Log ── -->
+<div class="section-header">
+  <h2>Decision Log</h2>
+  <span class="section-count">{{ decisions | length }} record(s)</span>
+</div>
+
+{% if decisions %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Symbol</th>
+        <th>Action</th>
+        <th>Reason</th>
+        <th>Detail</th>
+        <th>Trigger Price</th>
+        <th>Entry Price</th>
+        <th>P&amp;L at Exit</th>
+        <th>Paper</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in decisions %}
+      <tr>
+        <td>{{ d.decision_date }}</td>
+        <td><strong>{{ d.symbol or "—" }}</strong></td>
+        <td>
+          {% if d.action == 'EXIT' or d.action == 'exit' %}
+            <span class="badge badge-red">EXIT</span>
+          {% elif d.action == 'HOLD' or d.action == 'hold' %}
+            <span class="badge badge-grey">HOLD</span>
+          {% elif d.action == 'ALERT' or d.action == 'alert' %}
+            <span class="badge badge-orange">ALERT</span>
+          {% else %}
+            <span class="badge badge-grey">{{ d.action or "—" }}</span>
+          {% endif %}
+        </td>
+        <td class="text-col">{{ d.reason or "—" }}</td>
+        <td class="text-col" style="max-width:200px;white-space:normal;font-size:0.8rem;">
+          {{ d.detail or "—" }}
+        </td>
+        <td>
+          {% if d.trigger_price is not none %}
+            &#x20b9;{{ "{:,.2f}".format(d.trigger_price) }}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if d.entry_price is not none %}
+            &#x20b9;{{ "{:,.2f}".format(d.entry_price) }}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if d.unrealized_pnl_pct is not none %}
+            <span class="{{ 'pos' if d.unrealized_pnl_pct >= 0 else 'neg' }}" style="font-weight:600;">
+              {{ "{:+.2f}%".format(d.unrealized_pnl_pct) }}
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if d.paper %}
+            <span class="badge badge-orange">paper</span>
+          {% else %}
+            <span class="badge badge-green">live</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert-empty">
+  No guard actions taken — all positions held within limits.
+</div>
+{% endif %}
+
+{% endblock %}

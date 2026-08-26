@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Momentum Portfolio{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:baseline;gap:1rem;margin-bottom:0.25rem;">
+  <h1>Momentum Portfolio</h1>
+  {% if signal_date %}
+    <span class="muted" style="font-size:0.9rem;">Signal date: {{ signal_date }}</span>
+  {% endif %}
+  {% if in_market %}
+    <span class="badge badge-green">IN MARKET</span>
+  {% else %}
+    <span class="badge badge-grey">IN CASH</span>
+  {% endif %}
+</div>
+<p class="subtitle">Top-10 NSE stocks by composite momentum score. Rebalances monthly.</p>
+
+<!-- ── Regime reminder ── -->
+{% if regime.is_bull is not none %}
+<div class="alert {{ 'alert-success' if regime.is_bull else 'alert-warning' }}" style="margin-bottom:1.25rem;">
+  Regime: <strong>{{ regime.regime_label }}</strong>
+  {% if regime.nifty_vs_ema_pct is not none %}
+    &nbsp;— Nifty is
+    {% if regime.nifty_vs_ema_pct >= 0 %}
+      {{ "+{:.1f}%".format(regime.nifty_vs_ema_pct) }} above
+    {% else %}
+      {{ "{:.1f}%".format(regime.nifty_vs_ema_pct) }} below
+    {% endif %}
+    its 200d EMA.
+  {% endif %}
+  {% if not regime.is_bull %}
+    Portfolio stays in LIQUIDBEES until Nifty reclaims EMA200.
+  {% endif %}
+</div>
+{% endif %}
+
+{% if in_market %}
+<!-- ══ IN MARKET: Holdings table ══ -->
+<h2 style="margin-top:0;">Current Holdings</h2>
+
+{% if holdings %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Stock</th>
+        <th>Entry Date</th>
+        <th>Entry Price</th>
+        <th>Current Price</th>
+        <th>P&amp;L %</th>
+        <th>Hard Stop</th>
+        <th>Weight</th>
+        <th>Qty</th>
+        <th>Days Held</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in holdings %}
+      <tr>
+        <td><strong>{{ h.symbol }}</strong></td>
+        <td>{{ h.entry_date or "—" }}</td>
+        <td>
+          {% if h.entry_price is not none %}
+            &#x20b9;{{ "{:,.2f}".format(h.entry_price) }}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if h.current_price is not none %}
+            &#x20b9;{{ "{:,.2f}".format(h.current_price) }}
+            <span class="muted" style="font-size:0.76rem;">({{ h.price_date or "" }})</span>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if h.unrealized_pnl_pct is not none %}
+            <span class="{{ 'pos' if h.unrealized_pnl_pct >= 0 else 'neg' }}" style="font-weight:600;">
+              {{ "{:+.2f}%".format(h.unrealized_pnl_pct) }}
+            </span>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if h.hard_stop is not none %}
+            <span class="neg">&#x20b9;{{ "{:,.2f}".format(h.hard_stop) }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if h.weight is not none %}
+            {{ "{:.1%}".format(h.weight) }}
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ h.qty or "—" }}</td>
+        <td>{{ h.days_held if h.days_held is not none else "—" }}d</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Summary row -->
+<div class="card" style="margin-top:0.75rem;background:#fafaf6;">
+  <div style="display:flex;gap:2.5rem;align-items:center;flex-wrap:wrap;">
+    <div>
+      <span class="muted" style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;">Total Invested</span>
+      <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;margin-top:0.15rem;">
+        {{ total_invested }}
+      </div>
+    </div>
+    <div>
+      <span class="muted" style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;">Unrealized P&amp;L</span>
+      <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;margin-top:0.15rem;
+                  color:{{ 'var(--green)' if pnl_positive else 'var(--red)' }};">
+        {{ total_unrealized_pnl }}
+        <span style="font-size:0.9rem;">({{ total_unrealized_pnl_pct }})</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="alert-empty">
+  IN MARKET but no holdings found in <code>momentum_entries</code> table for signal date {{ signal_date }}.
+</div>
+{% endif %}
+
+{% else %}
+<!-- ══ IN CASH: LIQUIDBEES card ══ -->
+<div class="card" style="background:#f5f5f0;border-color:#d8d8d0;margin-bottom:1.25rem;">
+  <div style="display:flex;align-items:center;gap:1rem;">
+    <div style="font-size:2rem;color:#6b6b60;">&#x25cb;</div>
+    <div>
+      <div style="font-weight:700;font-size:1.05rem;color:#3a3a38;">Parked in LIQUIDBEES</div>
+      <div class="muted" style="margin-top:0.2rem;">
+        Earning ~6.5% p.a. until next market entry.
+        Regime exit triggered: Nifty &lt; 200d EMA.
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if prior_holdings_display %}
+<div class="card">
+  <div class="card-title">Last Held Portfolio</div>
+  <div style="margin-top:0.5rem;display:flex;flex-wrap:wrap;gap:0.4rem;">
+    {% for sym in prior_holdings_display %}
+    <span class="badge badge-grey">{{ sym }}</span>
+    {% endfor %}
+  </div>
+  <div class="muted" style="margin-top:0.5rem;font-size:0.82rem;">
+    Exited at last rebalance. Will re-enter when regime turns bullish.
+  </div>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- ── Signal History ── -->
+<div class="section-header" style="margin-top:2rem;">
+  <h2>Full Signal History</h2>
+  <span class="section-count">{{ all_signals | length }} runs</span>
+</div>
+
+{% if all_signals %}
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Status</th>
+        <th>Portfolio</th>
+        <th>Action</th>
+        <th>Nifty 6m Ret</th>
+        <th>Capital</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sig in all_signals %}
+      <tr>
+        <td>{{ sig.signal_date }}</td>
+        <td>
+          {% if sig.in_market %}
+            <span class="badge badge-green">IN MARKET</span>
+          {% else %}
+            <span class="badge badge-grey">IN CASH</span>
+          {% endif %}
+        </td>
+        <td class="text-col" style="max-width:320px;white-space:normal;font-size:0.82rem;">
+          {{ sig.portfolio_display }}
+        </td>
+        <td class="text-col">{{ sig.action_label }}</td>
+        <td>
+          {% if sig.nifty_6m_ret is not none %}
+            <span class="{{ 'pos' if sig.nifty_6m_ret >= 0 else 'neg' }}">
+              {{ "{:+.1%}".format(sig.nifty_6m_ret) }}
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if sig.capital is not none %}
+            &#x20b9;{{ "{:,.0f}".format(sig.capital) }}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert-empty">
+  No signal history yet. Run <code>python scripts/monthly_run.py</code> to generate signals.
+</div>
+{% endif %}
+
+{% endblock %}

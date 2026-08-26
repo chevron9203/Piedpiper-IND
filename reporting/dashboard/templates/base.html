@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PiedPiper — {% block title %}Dashboard{% endblock %}</title>
+  <title>Piedpiper — NSE Momentum — {% block title %}Dashboard{% endblock %}</title>
   <style>
     /* ── Reset & base ─────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -359,22 +359,20 @@
 <body>
 
 <nav>
-  <div class="nav-brand">&#x25c9; PiedPiper</div>
+  <div class="nav-brand">&#x25c9; Piedpiper</div>
   <ul class="nav-links">
-    <li><a href="{{ url_for('today') }}"
-           class="{{ 'active' if active_tab == 'today' else '' }}">Today</a></li>
-    <li><a href="{{ url_for('ledger_a') }}"
-           class="{{ 'active' if active_tab == 'ledger_a' else '' }}">Ledger A</a></li>
-    <li><a href="{{ url_for('ledger_b_view') }}"
-           class="{{ 'active' if active_tab == 'ledger_b' else '' }}">Ledger B</a></li>
-    <li><a href="{{ url_for('comparison') }}"
-           class="{{ 'active' if active_tab == 'comparison' else '' }}">Comparison</a></li>
-    <li><a href="{{ url_for('backtest_view') }}"
-           class="{{ 'active' if active_tab == 'backtest' else '' }}">Backtest</a></li>
-    <li><a href="{{ url_for('universe_view') }}"
-           class="{{ 'active' if active_tab == 'universe' else '' }}">Universe</a></li>
+    <li><a href="{{ url_for('overview') }}"
+           class="{{ 'active' if active_tab == 'overview' else '' }}">Overview</a></li>
+    <li><a href="{{ url_for('momentum') }}"
+           class="{{ 'active' if active_tab == 'momentum' else '' }}">Momentum Portfolio</a></li>
+    <li><a href="{{ url_for('guard') }}"
+           class="{{ 'active' if active_tab == 'guard' else '' }}">Daily Guard</a></li>
     <li><a href="{{ url_for('intraday_view') }}"
-           class="{{ 'active' if active_tab == 'intraday' else '' }}">Intraday</a></li>
+           class="{{ 'active' if active_tab == 'intraday' else '' }}">Intraday ORB</a></li>
+    <li><a href="{{ url_for('research') }}"
+           class="{{ 'active' if active_tab == 'research' else '' }}">Research</a></li>
+    <li><a href="{{ url_for('settings_view') }}"
+           class="{{ 'active' if active_tab == 'settings' else '' }}">Settings</a></li>
   </ul>
 </nav>
 

@@ -2,16 +2,24 @@
 {% block title %}Intraday ORB{% endblock %}
 
 {% block content %}
-<h1>Intraday ORB — Paper Trading</h1>
-<p class="subtitle">{{ run_date }} &nbsp;·&nbsp; Capital ₹{{ "{:,.0f}".format(capital) }} &nbsp;·&nbsp;
+<h1>Intraday ORB — Opening Range Breakout</h1>
+<p class="subtitle">
+  {{ run_date }} &nbsp;·&nbsp;
+  9:15–9:30 opening range &nbsp;·&nbsp; Max 3 signals/day &nbsp;·&nbsp;
+  Capital &#x20b9;{{ "{:,.0f}".format(capital) }} &nbsp;·&nbsp; 3% risk/trade &nbsp;·&nbsp;
   <span class="badge badge-orange">PAPER MODE</span>
-  &nbsp; No real orders placed &nbsp;·&nbsp; Opening range 9:15–9:30 &nbsp;·&nbsp; Auto SQO 3:15 PM
+  &nbsp;·&nbsp; Auto SQO 3:15 PM
 </p>
+
+<div class="alert-info" style="margin-bottom:1.25rem;font-size:0.85rem;">
+  <strong>Strategy:</strong> Stock breaks above/below the 9:15–9:30 opening range bar
+  with 3&times; volume surge. Long breakouts above range high, Short breakouts below range low.
+</div>
 
 <!-- ── Day summary ── -->
 <div class="metrics-row">
   <div class="metric-card">
-    <div class="card-title">Net P&L Today</div>
+    <div class="card-title">Net P&amp;L Today</div>
     <div class="card-value {{ 'pos' if net_pnl >= 0 else 'neg' }}">
       {{ "₹{:+,.0f}".format(net_pnl) }}
     </div>
@@ -29,7 +37,7 @@
     <div class="card-value neg">{{ "₹{:,.0f}".format(total_charges) }}</div>
   </div>
   <div class="metric-card">
-    <div class="card-title">All-Time Net P&L</div>
+    <div class="card-title">Total P&amp;L (paper)</div>
     <div class="card-value {{ 'pos' if all_time_pnl >= 0 else 'neg' }}">
       {{ "₹{:+,.0f}".format(all_time_pnl) }}
     </div>
@@ -65,9 +73,9 @@
         <th>Exit</th>
         <th>Reason</th>
         <th>Qty</th>
-        <th>Gross P&L</th>
+        <th>Gross P&amp;L</th>
         <th>Charges</th>
-        <th>Net P&L</th>
+        <th>Net P&amp;L</th>
         <th>Status</th>
         <th>Action</th>
       </tr>
@@ -76,7 +84,15 @@
       {% for t in today_rows %}
       <tr>
         <td><strong>{{ t.symbol }}</strong></td>
-        <td><span class="badge badge-blue">{{ t.direction or 'LONG' }}</span></td>
+        <td>
+          {% if t.direction == 'LONG' or t.direction == 'long' %}
+            <span class="badge badge-green">LONG</span>
+          {% elif t.direction == 'SHORT' or t.direction == 'short' %}
+            <span class="badge badge-red">SHORT</span>
+          {% else %}
+            <span class="badge badge-blue">{{ t.direction or 'LONG' }}</span>
+          {% endif %}
+        </td>
         <td>{{ "₹{:,.2f}".format(t.entry_price) if t.entry_price else "—" }}</td>
         <td>{{ "₹{:,.2f}".format(t.stop_loss) if t.stop_loss else "—" }}</td>
         <td>{{ "₹{:,.2f}".format(t.target) if t.target else "—" }}</td>
@@ -142,11 +158,12 @@
       <tr>
         <th>Date</th>
         <th>Symbol</th>
+        <th>Dir</th>
         <th>Entry</th>
         <th>Exit</th>
         <th>Reason</th>
         <th>Qty</th>
-        <th>Net P&L</th>
+        <th>Net P&amp;L</th>
       </tr>
     </thead>
     <tbody>
@@ -154,13 +171,22 @@
       <tr>
         <td>{{ t.trade_date }}</td>
         <td><strong>{{ t.symbol }}</strong></td>
+        <td>
+          {% if t.direction == 'LONG' or t.direction == 'long' %}
+            <span class="badge badge-green">L</span>
+          {% elif t.direction == 'SHORT' or t.direction == 'short' %}
+            <span class="badge badge-red">S</span>
+          {% else %}
+            <span class="badge badge-grey">{{ t.direction or "—" }}</span>
+          {% endif %}
+        </td>
         <td>{{ "₹{:,.2f}".format(t.entry_price) if t.entry_price else "—" }}</td>
         <td>{{ "₹{:,.2f}".format(t.exit_price) if t.exit_price else "—" }}</td>
         <td>
           {% if t.exit_reason == 'target' %}<span class="badge badge-green">target</span>
           {% elif t.exit_reason == 'stop' %}<span class="badge badge-red">stop</span>
           {% elif t.exit_reason == 'squareoff' %}<span class="badge badge-orange">SQO</span>
-          {% else %}<span class="badge badge-grey">—</span>{% endif %}
+          {% else %}<span class="badge badge-grey">{{ t.exit_reason or "—" }}</span>{% endif %}
         </td>
         <td>{{ t.qty }}</td>
         <td class="{{ 'pos' if (t.net_pnl or 0) >= 0 else 'neg' }}">

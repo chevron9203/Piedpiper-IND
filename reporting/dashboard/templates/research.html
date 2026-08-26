@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block title %}Research{% endblock %}
+
+{% block content %}
+<h1>Research</h1>
+<p class="subtitle">Backtest results for all strategies running in Piedpiper.</p>
+
+<!-- ══ Monthly Momentum ══ -->
+<h2 style="margin-top:0.5rem;">Monthly Momentum Strategy</h2>
+
+<div class="metrics-row" style="grid-template-columns:1fr 1fr;">
+
+  <!-- IS results -->
+  <div class="card" style="border-left:4px solid var(--text-muted);">
+    <div class="card-title">In-Sample (IS) · 2015–2020</div>
+    <div style="display:flex;gap:2rem;margin-top:0.75rem;flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">CAGR</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;">+5.5%</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Max Drawdown</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--red);">-38.6%</div>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:0.5rem;font-size:0.82rem;">
+      Includes 2020 COVID crash. Training period — parameters were tuned on this data.
+    </div>
+  </div>
+
+  <!-- OOS results -->
+  <div class="card" style="border-left:4px solid var(--green);">
+    <div class="card-title">Out-of-Sample (OOS) · 2021–2026</div>
+    <div style="display:flex;gap:2rem;margin-top:0.75rem;flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">CAGR</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--green);">+23.7%</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Max Drawdown</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--red);">-22.7%</div>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:0.5rem;font-size:0.82rem;">
+      Unseen data. Strategy was not re-fitted. Nifty 50 returned ~14% CAGR over same period.
+    </div>
+  </div>
+
+</div>
+
+<!-- OOS Year-by-year table -->
+<div class="card">
+  <div class="card-title">OOS Year-by-Year Results (2021–2026)</div>
+  <div class="table-wrapper" style="margin:0.75rem 0 0;border:none;">
+    <table style="border:none;">
+      <thead>
+        <tr>
+          <th>Year</th>
+          <th>Return</th>
+          <th>Comment</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2021</td>
+          <td class="pos" style="font-weight:700;">+58.9%</td>
+          <td class="text-col muted">Post-COVID recovery bull run</td>
+        </tr>
+        <tr>
+          <td>2022</td>
+          <td class="neg" style="font-weight:700;">-11.4%</td>
+          <td class="text-col muted">Rate hike cycle, global selloff. Regime filter limited damage.</td>
+        </tr>
+        <tr>
+          <td>2023</td>
+          <td class="pos" style="font-weight:700;">+46.8%</td>
+          <td class="text-col muted">Strong mid/small cap rally</td>
+        </tr>
+        <tr>
+          <td>2024</td>
+          <td class="pos" style="font-weight:700;">+48.3%</td>
+          <td class="text-col muted">Continued broad market strength</td>
+        </tr>
+        <tr>
+          <td>2025</td>
+          <td class="pos" style="font-weight:700;">+3.7%</td>
+          <td class="text-col muted">Choppy year, regime filter kept to CASH for part of year</td>
+        </tr>
+        <tr>
+          <td>2026 YTD</td>
+          <td class="pos" style="font-weight:700;">+4.9%</td>
+          <td class="text-col muted">Partial year (Jan–Aug 2026)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="alert-info" style="margin-top:1rem;font-size:0.85rem;">
+    <strong>Realistic long-term estimate: 15–18% CAGR.</strong>
+    High OOS returns (2021, 2023, 2024) were helped by unusually strong mid-cap tailwinds.
+    Expect mean reversion toward 15–18% over a full cycle.
+  </div>
+</div>
+
+<!-- Strategy config -->
+<div class="card" style="background:#fafaf6;">
+  <div class="card-title">Strategy Configuration</div>
+  <div class="table-wrapper" style="margin:0.75rem 0 0;border:none;">
+    <table style="border:none;">
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="text-col muted">Universe</td>
+          <td>500 NSE stocks (Nifty 500)</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Momentum Score</td>
+          <td>Composite: 12m×40% + 6m×30% + 3m×20% + 1m×10%</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Position Sizing</td>
+          <td>Inverse volatility weights</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Portfolio Size</td>
+          <td>Top 10 stocks</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Stock Filter</td>
+          <td>Stock must be above its own 200d EMA</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Market Regime</td>
+          <td>Nifty 50 &gt; 200d EMA → invested; else → LIQUIDBEES</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Rebalance</td>
+          <td>Last trading day of each month</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Sector Cap</td>
+          <td>Max 3 stocks per sector</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">Hard Stop</td>
+          <td>-15% from entry (checked daily at 4:35 PM)</td>
+        </tr>
+        <tr>
+          <td class="text-col muted">VIX Emergency Exit</td>
+          <td>India VIX &gt; 35 → exit all</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══ Intraday ORB ══ -->
+<h2>Intraday ORB (Opening Range Breakout)</h2>
+
+<div class="metrics-row" style="grid-template-columns:1fr 1fr;">
+
+  <div class="card" style="border-left:4px solid var(--green);">
+    <div class="card-title">LONG Only (Bull Regime Days) · 2020–2026</div>
+    <div style="display:flex;gap:2rem;margin-top:0.75rem;flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Total P&amp;L</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--green);">₹+2.5L</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Win Rate</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;">39.2%</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Max Drawdown</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--red);">-15.4%</div>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:0.5rem;font-size:0.82rem;">615 trades · Avg win ₹+3,289 · Avg loss ₹-1,446 · Capital ₹50,000</div>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--red);">
+    <div class="card-title">SHORT Only (Bear Regime Days) · 2020–2026</div>
+    <div style="display:flex;gap:2rem;margin-top:0.75rem;flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Total P&amp;L</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--red);">₹-35,254</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Win Rate</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--red);">28.0%</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;">Max Drawdown</div>
+        <div style="font-family:var(--font-mono);font-size:1.4rem;font-weight:700;color:var(--red);">-79.3%</div>
+      </div>
+    </div>
+    <div class="muted" style="margin-top:0.5rem;font-size:0.82rem;">182 trades · Avg win ₹+2,968 · Avg loss ₹-1,425 · Not deployed.</div>
+  </div>
+
+</div>
+
+<!-- ORB LONG Year-by-year -->
+<div class="card">
+  <div class="card-title">LONG Only — Year-by-Year P&amp;L (₹50,000 capital)</div>
+  <div class="table-wrapper" style="margin:0.75rem 0 0;border:none;">
+    <table style="border:none;">
+      <thead>
+        <tr>
+          <th>Year</th>
+          <th>Net P&amp;L</th>
+          <th>Comment</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>2020</td><td class="pos">₹+43,177</td><td class="muted text-col">Partial year (COVID dip in Q1). Good recovery in H2.</td></tr>
+        <tr><td>2021</td><td class="pos">₹+80,377</td><td class="muted text-col">Best year — strong directional momentum, many clean breakouts</td></tr>
+        <tr><td>2022</td><td class="pos">₹+8,928</td><td class="muted text-col">Rate hike year, choppy. LONG-only regime filter helped.</td></tr>
+        <tr><td>2023</td><td class="pos">₹+47,975</td><td class="muted text-col">Strong year, mid-cap breakouts worked well</td></tr>
+        <tr><td>2024</td><td class="pos">₹+54,638</td><td class="muted text-col">Continued strength, highest signal count</td></tr>
+        <tr><td>2025</td><td class="pos">₹+3,317</td><td class="muted text-col">Very choppy — frequent stop-outs. Still positive.</td></tr>
+        <tr><td>2026 YTD</td><td class="pos">₹+13,389</td><td class="muted text-col">Partial year (Jan–Aug 2026)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="alert-info" style="margin-top:1rem;font-size:0.85rem;">
+    <strong>Conclusion: Run LONG only on bull regime days. Skip shorts entirely.</strong>
+    Short ORB loses in most years (win rate 28%, max DD -79%) while LONG ORB has a consistent positive edge.
+    Exit breakdown: 66% stop-outs (avg -₹939), 14% target hit (avg +₹5,412), 20% end-of-day square-off (avg +₹1,422).
+  </div>
+</div>
+
+<!-- ORB Setup -->
+<div class="card" style="background:#fafaf6;">
+  <div class="card-title">ORB Strategy Configuration</div>
+  <div class="table-wrapper" style="margin:0.75rem 0 0;border:none;">
+    <table style="border:none;">
+      <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td class="muted text-col">Universe</td><td>200 Nifty 200 stocks (liquid equity)</td></tr>
+        <tr><td class="muted text-col">Opening Range</td><td>9:15–9:30 AM (first 15-min bar)</td></tr>
+        <tr><td class="muted text-col">Entry Trigger</td><td>Breakout above range high (LONG only)</td></tr>
+        <tr><td class="muted text-col">Volume Filter</td><td>3× 20-day avg opening-bar volume</td></tr>
+        <tr><td class="muted text-col">Range Size Filter</td><td>0.3–2.5%, skip 1.0–1.5% bucket (too erratic)</td></tr>
+        <tr><td class="muted text-col">Stop Loss</td><td>40% of range from entry</td></tr>
+        <tr><td class="muted text-col">Target</td><td>1.5× range from entry</td></tr>
+        <tr><td class="muted text-col">Max Signals/Day</td><td>3 (ranked by volume ratio)</td></tr>
+        <tr><td class="muted text-col">Auto Square-Off</td><td>3:15 PM</td></tr>
+        <tr><td class="muted text-col">Capital</td><td>₹50,000 intraday · 3% risk per trade</td></tr>
+        <tr><td class="muted text-col">Regime Filter</td><td>LONG only on Nifty &gt; EMA20 days</td></tr>
+        <tr><td class="muted text-col">Stock Filter</td><td>Price above stock's own EMA20</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
