@@ -103,13 +103,13 @@ def setup_eod2() -> None:
 
 
 def update_eod2() -> None:
-    """Run EOD2 daily update (dget.py) to fetch latest adjusted data."""
+    """Run EOD2 daily update (init.py) to fetch latest adjusted data from NSE."""
     if not is_eod2_available():
         raise RuntimeError("EOD2 not initialised. Run setup_eod2() first.")
 
     logger.info("Updating EOD2 data...")
     result = subprocess.run(
-        [sys.executable, str(EOD2_DIR / "src" / "dget.py")],
+        [sys.executable, str(EOD2_DIR / "src" / "init.py")],
         capture_output=True, text=True, cwd=str(EOD2_DIR / "src")
     )
     if result.returncode != 0:
