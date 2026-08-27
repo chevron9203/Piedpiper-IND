@@ -254,7 +254,6 @@ def _log_monthly_signal(sig: dict, holdings: list[str] | None, capital: float) -
             "gold_6m_ret":   round(float(sig.get("gold_6m_ret", float("nan")) or float("nan")), 4)
                              if sig.get("gold_6m_ret") == sig.get("gold_6m_ret") else None,
             "target":        json.dumps(sig.get("target", [])),
-            "watchlist":     json.dumps(sig.get("watchlist", [])),
             "weights":       json.dumps({k: round(v, 4) for k, v in (sig.get("weights") or {}).items()}),
             "prior_holdings": json.dumps(holdings or []),
             "capital":       capital,
@@ -269,7 +268,6 @@ def _log_monthly_signal(sig: dict, holdings: list[str] | None, capital: float) -
                     nifty_6m_ret  DOUBLE,
                     gold_6m_ret   DOUBLE,
                     target        VARCHAR,
-                    watchlist     VARCHAR,
                     weights       VARCHAR,
                     prior_holdings VARCHAR,
                     capital       DOUBLE,
@@ -277,12 +275,11 @@ def _log_monthly_signal(sig: dict, holdings: list[str] | None, capital: float) -
                 )
             """)
             conn.execute("""
-                INSERT INTO monthly_signals VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO monthly_signals VALUES (?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT (signal_date) DO UPDATE SET
                     in_market=excluded.in_market, defensive_mode=excluded.defensive_mode,
                     nifty_6m_ret=excluded.nifty_6m_ret, gold_6m_ret=excluded.gold_6m_ret,
-                    target=excluded.target, watchlist=excluded.watchlist,
-                    weights=excluded.weights,
+                    target=excluded.target, weights=excluded.weights,
                     prior_holdings=excluded.prior_holdings, capital=excluded.capital,
                     logged_at=excluded.logged_at
             """, list(record.values()))
