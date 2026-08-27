@@ -110,7 +110,7 @@ MAX_CONCURRENT_POSITIONS = 5
 MAX_CAPITAL_DEPLOYED_PCT = 0.80
 MAX_POSITIONS_PER_SECTOR = 2
 STARTING_VIRTUAL_CAPITAL = 100_000.0  # ₹1 lakh
-INTRADAY_CAPITAL         = float(os.getenv("INTRADAY_CAPITAL", "50000"))  # ORB daily capital
+INTRADAY_CAPITAL         = float(os.getenv("INTRADAY_CAPITAL", "200000"))  # ORB daily capital (₹2L — confirmed via backtest Aug 2026)
 
 # ── Signal gating ────────────────────────────────────────────────────────────
 CONFIDENCE_THRESHOLD = 0.55            # tuned during backtesting; do not adjust after deployment
