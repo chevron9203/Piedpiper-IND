@@ -9,6 +9,7 @@ pandas>=2.1.0
 numpy>=1.26.0
 pyarrow>=14.0.0
 duckdb>=0.10.0
+yfinance>=0.2.0   # intraday/regime data fallback (used by scripts/intraday_run.py)
 
 # ML
 lightgbm>=4.3.0

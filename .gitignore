@@ -16,3 +16,12 @@ logs/
 .DS_Store
 venv/
 .venv/
+
+# Secrets / SSH keys — never commit
+*.key
+*.pem
+ssh-key-*
+*.pub
+
+# Local Claude Code agent state
+.claude/
