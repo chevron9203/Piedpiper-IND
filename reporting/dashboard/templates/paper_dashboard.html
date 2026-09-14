@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piedpiper · Paper Books</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root{--bg:#0a0d13;--panel:#141922;--panel2:#1b2230;--line:#232c3d;--ink:#e8eef7;--dim:#8a97ac;
+    --pos:#2ad584;--neg:#ff5f6e;--acc:#5b8cff;
+    --s1:#5b8cff;--s2:#2ad584;--s3:#e2b53e;--s4:#e25f8e;--s5:#c47bff;}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1200px;margin:0 auto;padding:20px 20px 60px}
+  header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  h1{font-size:19px;margin:0;font-weight:680;letter-spacing:.2px}h1 .dot{color:var(--s3)}
+  .sub{color:var(--dim);font-size:12.5px}
+  .pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:.4px;margin-left:5px}
+  .pill.off{background:rgba(226,181,62,.14);color:var(--s3);border:1px solid rgba(226,181,62,.3)}
+  .pill.on{background:rgba(42,213,132,.14);color:var(--pos);border:1px solid rgba(42,213,132,.3)}
+  .pill.paper{background:rgba(91,140,255,.12);color:var(--acc);border:1px solid rgba(91,140,255,.28)}
+  /* tab bar */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px;overflow-x:auto}
+  .tab{padding:10px 14px;font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--ink);border-bottom-color:var(--acc)}
+  .tab.active.t1{border-bottom-color:var(--s1)}.tab.active.t2{border-bottom-color:var(--s2)}
+  .tab.active.t3{border-bottom-color:var(--s3)}.tab.active.t4{border-bottom-color:var(--s4)}
+  .tab.active.t5{border-bottom-color:var(--s5)}
+  .view{display:none}.view.show{display:block}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+  .panel h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);margin:0 0 12px;font-weight:600}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .kpi .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+  .kpi .v{font-size:24px;font-weight:680}.kpi .s{font-size:11.5px;color:var(--dim);margin-top:3px}
+  .syscards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-bottom:14px}
+  .scard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;border-top:3px solid var(--line);cursor:pointer;transition:.15s}
+  .scard:hover{border-color:var(--acc)}
+  .scard.s1{border-top-color:var(--s1)}.scard.s2{border-top-color:var(--s2)}.scard.s3{border-top-color:var(--s3)}
+  .scard.s4{border-top-color:var(--s4)}.scard.s5{border-top-color:var(--s5)}
+  .scard .nm{font-size:14px;font-weight:650}.scard .ds{font-size:11px;color:var(--dim);margin-bottom:10px}
+  .scard .nav{font-size:24px;font-weight:680}
+  .scard .row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--dim);margin-top:7px}
+  .row b{font-weight:600}
+  .filters{display:flex;gap:5px;flex-wrap:wrap}
+  .fbtn{background:var(--panel2);border:1px solid var(--line);color:var(--dim);padding:4px 11px;border-radius:8px;font-size:11.5px;cursor:pointer;font-weight:600}
+  .fbtn.active{background:rgba(91,140,255,.15);color:var(--acc);border-color:rgba(91,140,255,.4)}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:right;padding:9px 6px;font-variant-numeric:tabular-nums;font-size:13px}
+  th{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line)}
+  td{border-bottom:1px solid rgba(35,44,61,.5)}th:first-child,td:first-child{text-align:left}
+  .bar{height:6px;border-radius:4px;background:var(--panel2);overflow:hidden;margin-top:4px}.bar>i{display:block;height:100%}
+  .pos{color:var(--pos)}.neg{color:var(--neg)}
+  .cmp{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-top:12px}
+  .cmp .b{background:var(--panel2);border-radius:10px;padding:10px 11px}
+  .cmp .b .n{font-size:10.5px;color:var(--dim)}.cmp .b .c{font-size:17px;font-weight:680;margin-top:2px}
+  .log{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--dim);max-height:420px;overflow:auto;line-height:1.75}
+  .log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .foot{color:var(--dim);font-size:11.5px;margin-top:16px;text-align:center}
+  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.cmp{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:540px){.syscards{grid-template-columns:1fr}.cmp{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>Piedpiper<span class="dot">·</span>Paper Books</h1><div class="sub" id="sub">loading…</div></div>
+    <div id="pills"></div>
+  </header>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-tab="overview" onclick="go('overview')">Overview</div>
+    <div class="tab t1" data-tab="s1" onclick="go('s1')">S1 · Momentum</div>
+    <div class="tab t2" data-tab="s2" onclick="go('s2')">S2 · Survivorship</div>
+    <div class="tab t3" data-tab="s3" onclick="go('s3')">S3 · Aggressive</div>
+    <div class="tab t4" data-tab="s4" onclick="go('s4')">S4 · Pure (Regime)</div>
+    <div class="tab t5" data-tab="s5" onclick="go('s5')">S5 · Pure (Always)</div>
+    <div class="tab" data-tab="activity" onclick="go('activity')">Activity</div>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div class="view show" id="view-overview">
+    <div class="syscards" id="syscards"></div>
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h2 style="margin:0">5 systems vs Nifty 50 / 500 · live</h2><div class="filters" id="filt-o"></div>
+      </div>
+      <div id="incept-o" class="sub" style="margin:6px 0 10px"></div>
+      <canvas id="chart-o" height="110"></canvas>
+      <div class="cmp" id="cmp-o"></div>
+    </div>
+  </div>
+
+  <!-- PER-SYSTEM views (rendered by JS) -->
+  <div class="view" id="view-s1"></div>
+  <div class="view" id="view-s2"></div>
+  <div class="view" id="view-s3"></div>
+  <div class="view" id="view-s4"></div>
+  <div class="view" id="view-s5"></div>
+
+  <!-- ACTIVITY -->
+  <div class="view" id="view-activity">
+    <div class="panel"><h2>Daily activity — signals, monitor, EOD tracking</h2><div class="log" id="activity">loading…</div></div>
+  </div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const rup=n=>"₹"+Math.round(n).toLocaleString('en-IN');
+const sign=n=>(n>0?'+':'')+Number(n).toFixed(2)+'%';
+const cls=n=>n>0?'pos':(n<0?'neg':'');
+const COL={s1_nav:'#5b8cff',s2_nav:'#2ad584',s3_nav:'#e2b53e',s4_nav:'#e25f8e',s5_nav:'#c47bff',
+           nifty50_nav:'#8a97ac',nifty500_nav:'#586a86'};
+const NM={s1_nav:'System 1',s2_nav:'System 2',s3_nav:'System 3',s4_nav:'System 4',s5_nav:'System 5',
+          nifty50_nav:'Nifty 50',nifty500_nav:'Nifty 500'};
+const SCOL={s1:'#5b8cff',s2:'#2ad584',s3:'#e2b53e',s4:'#e25f8e',s5:'#c47bff'};
+let DATA={}, PERF={}, ACT={}, tab='overview', period='all', charts={};
+
+function go(t){tab=t;document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active',e.dataset.tab===t));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('show'));
+  document.getElementById('view-'+t).classList.add('show');render();}
+function setP(p){period=p;loadPerf();}
+
+function chartCfg(canvasId,keys){
+  const ds=keys.map(k=>({label:NM[k],data:PERF.series[k],borderColor:COL[k],
+    borderWidth:k.startsWith('s')?2.2:1.2,borderDash:k.startsWith('nifty')?[4,3]:[],
+    pointRadius:PERF.days<40?2:0,tension:.15}));
+  return {type:'line',data:{labels:PERF.dates,datasets:ds},options:{plugins:{legend:{labels:{color:'#8a97ac',boxWidth:12,font:{size:11}}}},
+    scales:{y:{ticks:{color:'#8a97ac',callback:v=>rup(v)},grid:{color:'#1b2230'}},x:{ticks:{color:'#8a97ac',maxTicksLimit:8,font:{size:10}},grid:{display:false}}}}};
+}
+function drawChart(id,keys){const el=document.getElementById(id);
+  if(!PERF.dates||!el)return;if(charts[id]){charts[id].destroy();delete charts[id];}
+  charts[id]=new Chart(el,chartCfg(id,keys));}
+
+function filterBar(id){const P=[['1w','1W'],['1m','1M'],['3m','3M'],['6m','6M'],['12m','12M'],['all','All']];
+  document.getElementById(id).innerHTML=P.map(([k,l])=>`<button class="fbtn ${k===period?'active':''}" onclick="setP('${k}')">${l}</button>`).join('');}
+
+function render(){
+  try{ _render(); }
+  catch(e){ document.getElementById('sub').textContent='render error: '+e.message; console.error(e); }
+}
+function _render(){
+  if(!DATA.systems)return;
+  // OVERVIEW cards
+  document.getElementById('syscards').innerHTML=DATA.systems.map(sy=>`
+    <div class="scard ${sy.id}" onclick="go('${sy.id}')">
+      <div class="nm">${sy.name}</div><div class="ds">${sy.desc}</div>
+      <div class="nav">${rup(sy.nav)}</div>
+      <div class="row"><span>Overall</span><b class="${cls(sy.overall_pct)}">${sign(sy.overall_pct)}</b></div>
+      <div class="row"><span>Day</span><b class="${cls(sy.day_pct)}">${sign(sy.day_pct)}</b></div>
+      <div class="row"><span>Max DD</span><b>${sy.maxdd}%</b></div></div>`).join('');
+  // OVERVIEW compare boxes
+  if(PERF.stats){
+    const box=(k,c)=>{const o=PERF.stats[k]||{};return `<div class="b"><div class="n" style="color:${c}">${NM[k]}</div><div class="c ${o.ret>=0?'pos':'neg'}">${o.ret>=0?'+':''}${o.ret??0}%</div><div class="n">${rup(o.value||200000)} · DD ${o.maxdd??0}%</div></div>`;};
+    document.getElementById('cmp-o').innerHTML=
+      ['s1_nav','s2_nav','s3_nav','s4_nav','s5_nav','nifty50_nav','nifty500_nav'].map(k=>box(k,COL[k])).join('');
+  }
+  // PER-SYSTEM views
+  DATA.systems.forEach(sy=>{
+    const sysKeys={'s1':['s1_nav','nifty50_nav','nifty500_nav'],
+                   's2':['s2_nav','nifty50_nav','nifty500_nav'],
+                   's3':['s3_nav','nifty50_nav','nifty500_nav'],
+                   's4':['s4_nav','s5_nav','nifty50_nav','nifty500_nav'],
+                   's5':['s5_nav','s4_nav','nifty50_nav','nifty500_nav']};
+    const picks=sy.momentum_picks||[];
+    const isMultiAsset=sy.id==='s1'||sy.id==='s2'||sy.id==='s3';
+    const descLine=isMultiAsset
+      ? (sy.id==='s1'?'Multi-asset: momentum equity + gold + US Nasdaq, regime-conditional.':
+         sy.id==='s2'?'Built on S1\'s book: 70% arbitrage + 30% @2× (barbell).':
+         '2× of S1\'s book (aggressive leverage).')
+      : (sy.id==='s4'?'Pure Indian MID-cap momentum. Moves to cash when regime is OFF.':
+         'Pure Indian MID-cap momentum. Always invested regardless of regime.');
+    document.getElementById('view-'+sy.id).innerHTML=`
+      <div class="kpis">
+        <div class="kpi"><div class="k">Value</div><div class="v">${rup(sy.nav)}</div><div class="s">from ₹2,00,000</div></div>
+        <div class="kpi"><div class="k">Overall P&L</div><div class="v ${cls(sy.overall_pct)}">${sign(sy.overall_pct)}</div><div class="s">since inception</div></div>
+        <div class="kpi"><div class="k">Day P&L</div><div class="v ${cls(sy.day_pct)}">${sign(sy.day_pct)}</div><div class="s">${DATA.market_status}</div></div>
+        <div class="kpi"><div class="k">Max Drawdown</div><div class="v">${sy.maxdd}%</div><div class="s">worst dip so far</div></div>
+      </div>
+      <div class="panel"><h2>${sy.name} vs benchmark · live</h2><div class="sub" style="margin-bottom:8px">${sy.desc}</div>
+        <canvas id="chart-${sy.id}" height="110"></canvas></div>
+      <div class="panel"><h2>Holdings · gross ${sy.gross}% ${sy.borrow?('· '+sy.borrow+'% borrowed (leverage)'):'· no leverage'}</h2>
+        <div class="sub" style="margin-bottom:10px">${descLine}</div>
+        <table><thead><tr><th>Asset</th><th>Weight</th></tr></thead><tbody>
+        ${(sy.positions||[]).map(p=>`<tr><td>${p.label}<div class="bar"><i style="width:${Math.min(p.weight,100)}%;background:${SCOL[sy.id]}"></i></div></td><td>${p.weight}%</td></tr>`).join('')||'<tr><td>—</td><td></td></tr>'}
+        </tbody></table>
+        ${picks.length?`<div class="sub" style="margin-top:10px"><b>Momentum stocks (${picks.length}):</b> ${picks.join(', ')}</div>`:''}
+      </div>`;
+  });
+  document.getElementById('activity').innerHTML=((ACT.monitor&&ACT.monitor.length?ACT.monitor:ACT.signal)||[]).map(l=>`<div>${l.replace(/</g,'&lt;')}</div>`).join('');
+  // charts
+  if(tab==='overview'){filterBar('filt-o');drawChart('chart-o',['s1_nav','s2_nav','s3_nav','s4_nav','s5_nav','nifty50_nav','nifty500_nav']);}
+  else if(tab[0]==='s'){
+    const keys={'s1':['s1_nav','nifty50_nav','nifty500_nav'],'s2':['s2_nav','nifty50_nav','nifty500_nav'],
+                 's3':['s3_nav','nifty50_nav','nifty500_nav'],'s4':['s4_nav','s5_nav','nifty50_nav','nifty500_nav'],
+                 's5':['s5_nav','s4_nav','nifty50_nav','nifty500_nav']};
+    drawChart('chart-'+tab, keys[tab]||[tab+'_nav','nifty50_nav','nifty500_nav']);
+  }
+}
+
+async function loadPerf(){
+  try{ PERF=await (await fetch('/api/performance?period='+period)).json();
+    if(PERF.dates){document.getElementById('incept-o').textContent=`live since ${PERF.inception} · ${PERF.days} day${PERF.days>1?'s':''} · ₹2,00,000 start each`;}
+    render();
+  }catch(e){ document.getElementById('incept-o').textContent='perf error: '+e.message; console.error(e); }
+}
+async function refresh(){
+  try{
+    const [st,ac]=await Promise.all([
+      fetch('/api/status').then(r=>r.json()),
+      fetch('/api/activity').then(r=>r.json()).catch(()=>({}))
+    ]);
+    DATA=st; ACT=ac||{};
+    document.getElementById('sub').textContent=`signal as-of ${DATA.as_of} · updated ${DATA.updated}`;
+    const mopen=DATA.market_status==='open';
+    document.getElementById('pills').innerHTML=`<span class="pill paper">${DATA.mode}</span>`+
+      `<span class="pill ${DATA.risk_on?'on':'off'}">${DATA.risk_on?'RISK-ON':'RISK-OFF'}</span>`+
+      `<span class="pill ${mopen?'on':'off'}">${mopen?'MARKET OPEN':'MARKET CLOSED'}</span>`;
+    document.getElementById('foot').textContent=`Paper · localhost · prices as-of ${DATA.prices_asof||'—'} · ${DATA.market_status} · updated ${DATA.updated}`;
+    render();
+  }catch(e){ document.getElementById('sub').textContent='load error: '+e.message; console.error(e); }
+}
+refresh();loadPerf();setInterval(()=>{refresh();loadPerf();},60000);
+</script>
+</body>
+</html>

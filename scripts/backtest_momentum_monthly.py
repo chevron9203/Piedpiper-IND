@@ -55,15 +55,16 @@ DP_CHARGE      = 25.50   # ₹ per sell (demat)
 STT_BUY_PCT    = 0.001   # 0.1% STT on delivery buy
 STT_SELL_PCT   = 0.001   # 0.1% STT on delivery sell
 EXCHANGE_CHARGE_PCT = 0.00003  # NSE + SEBI + stamp (approx)
+SLIPPAGE_PCT   = 0.0010  # 0.10% adverse market impact/spread per leg (was MISSING — inflated returns)
 
 
 def _trade_cost(value: float, side: str) -> float:
-    """One-sided transaction cost: brokerage + STT + DP (sell only) + exchange."""
+    """One-sided transaction cost: brokerage + STT + DP (sell only) + exchange + slippage."""
     cost = BROKERAGE_BUY if side == "buy" else BROKERAGE_SELL
     if side == "sell":
         cost += DP_CHARGE
     stt_pct = STT_BUY_PCT if side == "buy" else STT_SELL_PCT
-    cost += value * (stt_pct + EXCHANGE_CHARGE_PCT)
+    cost += value * (stt_pct + EXCHANGE_CHARGE_PCT + SLIPPAGE_PCT)
     return cost
 
 
