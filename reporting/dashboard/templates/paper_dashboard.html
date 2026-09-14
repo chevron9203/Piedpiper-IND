@@ -188,7 +188,9 @@ function _render(){
         ${picks.length?`<div class="sub" style="margin-top:10px"><b>Momentum stocks (${picks.length}):</b> ${picks.join(', ')}</div>`:''}
       </div>`;
   });
-  document.getElementById('activity').innerHTML=((ACT.monitor&&ACT.monitor.length?ACT.monitor:ACT.signal)||[]).map(l=>`<div>${l.replace(/</g,'&lt;')}</div>`).join('');
+  const monLines=(ACT.monitor||[]).map(l=>`<div>${l.replace(/</g,'&lt;')}</div>`).join('');
+  const sigLines=(ACT.signal||[]).map(l=>`<div style="color:#5b8cff">${l.replace(/</g,'&lt;')}</div>`).join('');
+  document.getElementById('activity').innerHTML=(sigLines||'')+(monLines||'') || '<div>No activity yet</div>';
   // charts
   if(tab==='overview'){filterBar('filt-o');drawChart('chart-o',['s1_nav','s2_nav','s3_nav','s4_nav','s5_nav','nifty50_nav','nifty500_nav']);}
   else if(tab[0]==='s'){

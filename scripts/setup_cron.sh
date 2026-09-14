@@ -1,63 +1,47 @@
 #!/bin/bash
-# Setup all Piedpiper cron jobs.
-# Run once: bash scripts/setup_cron.sh
-# System must be in Asia/Kolkata (IST) timezone — confirmed on this machine.
+# Install all Piedpiper cron jobs on the Oracle Free Tier box.
+# Run once on the server: bash scripts/setup_cron.sh
+# Requires: project at ~/piedpiper, venv at ~/piedpiper/.venv
 
-PROJ="/Users/abc/Documents/ozi-code/piedpiper"
-PYTHON=$(which python3)
+set -e
+PROJ="/home/ubuntu/piedpiper"
+PYTHON="$PROJ/.venv/bin/python3"
 
-# Resolve virtualenv python if it exists
-if [ -f "$PROJ/.venv/bin/python3" ]; then
-    PYTHON="$PROJ/.venv/bin/python3"
-fi
-
+if [ ! -f "$PYTHON" ]; then echo "ERROR: venv not found at $PYTHON"; exit 1; fi
 echo "Using Python: $PYTHON"
-echo "Project: $PROJ"
-
-# Build the cron block
-CRON_BLOCK="
-# ── Piedpiper automated trading ──────────────────────────────────────────
-# Intraday ORB: fetch opening range (9:15-9:30 candle) and compute signals
-# Runs at 9:31 AM IST Mon-Fri  (opening range candle completes at 9:30)
-31 9 * * 1-5 cd $PROJ && $PYTHON scripts/intraday_run.py --capital 50000 >> logs/intraday_run.log 2>&1
-
-# Intraday monitor: check LTP vs target/stop every 15 min, trail stop to BE, auto-exit at target
-# Runs every 15 min from 9:45 AM to 2:45 PM IST Mon-Fri
-*/15 9-14 * * 1-5 cd $PROJ && $PYTHON scripts/intraday_monitor.py >> logs/intraday_monitor.log 2>&1
-
-# Intraday square-off: close all paper/live positions before Angel One auto-SQO at 3:15 PM
-# Runs at 3:10 PM IST Mon-Fri
-10 15 * * 1-5 cd $PROJ && $PYTHON scripts/intraday_squareoff.py >> logs/intraday_squareoff.log 2>&1
-
-# Monthly momentum: check every trading day evening; only fires on last trading day of month
-# Runs at 6:00 PM IST Mon-Fri
-0 18 * * 1-5 cd $PROJ && $PYTHON scripts/monthly_run.py >> logs/monthly_run.log 2>&1
-# ── End Piedpiper ─────────────────────────────────────────────────────────
-"
-
-# Make sure logs dir exists
 mkdir -p "$PROJ/logs"
 
-# Install into crontab (remove old piedpiper block if present, add fresh)
-( crontab -l 2>/dev/null | grep -v "Piedpiper\|intraday_run\|intraday_monitor\|intraday_squareoff\|monthly_run\|End Piedpiper" ; echo "$CRON_BLOCK" ) | crontab -
+CRON_BLOCK="CRON_TZ=Asia/Kolkata
+
+# ── Piedpiper — validated momentum system (PAPER) ──────────────────────────────
+# EOD data chain — runs after NSE bhavcopy posts (~19:00 IST)
+0  19 * * 1-5  cd $PROJ/data_store/eod2/src && $PYTHON init.py >> $PROJ/logs/eod2_update.log 2>&1
+15 19 * * 1-5  cd $PROJ && $PYTHON scripts/ingest_data.py >> logs/ingest_data.log 2>&1
+# EOD monitor + performance tracker (after data is fresh)
+30 19 * * 1-5  cd $PROJ && $PYTHON scripts/momentum_monitor.py >> logs/momentum_monitor.log 2>&1
+35 19 * * 1-5  cd $PROJ && $PYTHON scripts/performance_tracker.py >> logs/perf_tracker.log 2>&1
+# Monthly signals — 1st of each month 08:00 IST
+# S1 (multi-asset momentum + gold + US)
+0  8  1 * *   cd $PROJ && $PYTHON scripts/momentum_live.py >> logs/momentum_live.log 2>&1
+# S4 (pure MID-cap, regime-gated) + S5 (always invested) — runs 5 min after S1
+5  8  1 * *   cd $PROJ && $PYTHON scripts/momentum_live_pure.py >> logs/momentum_live_pure.log 2>&1
+# ── End Piedpiper ──────────────────────────────────────────────────────────────
+"
+
+# Install into crontab (idempotent: strip old Piedpiper block, add fresh)
+( crontab -l 2>/dev/null | grep -v "Piedpiper\|momentum_live\|momentum_monitor\|performance_tracker\|ingest_data\|eod2_update\|End Piedpiper\|CRON_TZ" ; echo "$CRON_BLOCK" ) | crontab -
 
 echo ""
-echo "Cron jobs installed. Current crontab:"
-echo "─────────────────────────────────────────"
-crontab -l
-echo "─────────────────────────────────────────"
+echo "Cron installed. Verify with: crontab -l"
 echo ""
-echo "Schedule (IST):"
-echo "  9:31 AM  Mon-Fri → intraday_run.py      (ORB signals + paper orders)"
-echo "  */15min  Mon-Fri → intraday_monitor.py  (LTP check, target exit, trail stop)"
-echo "  3:10 PM  Mon-Fri → intraday_squareoff.py (close all positions)"
-echo "  6:00 PM  Mon-Fri → monthly_run.py        (fires only on month-end)"
+echo "Schedule (Asia/Kolkata / IST):"
+echo "  1st of month 08:00  → momentum_live.py       (S1 signal)"
+echo "  1st of month 08:05  → momentum_live_pure.py  (S4 + S5 signals)"
+echo "  Mon-Fri     19:00   → eod2 init.py            (NSE data update)"
+echo "  Mon-Fri     19:15   → ingest_data.py          (DuckDB ingest)"
+echo "  Mon-Fri     19:30   → momentum_monitor.py     (portfolio check)"
+echo "  Mon-Fri     19:35   → performance_tracker.py  (NAV record)"
 echo ""
-echo "Manual early close (outside cron, run anytime during market hours):"
-echo "  python scripts/intraday_monitor.py --close RELIANCE"
-echo "  python scripts/intraday_monitor.py --close ALL"
-echo ""
-echo "Logs: $PROJ/logs/"
-echo "  tail -f logs/intraday_run.log"
-echo "  tail -f logs/intraday_squareoff.log"
-echo "  tail -f logs/monthly_run.log"
+echo "Dashboard (run once as a persistent process, NOT via cron):"
+echo "  nohup .venv/bin/python3 scripts/paper_dashboard.py >> logs/dashboard.log 2>&1 &"
+echo "  Access via SSH tunnel: ssh -L 5002:localhost:5002 ubuntu@<box-ip>"

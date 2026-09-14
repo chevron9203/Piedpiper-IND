@@ -115,7 +115,8 @@ def alloc_weights(risk_on, gold_px, us_px, wmom=0.70):
     return w, cash
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--dry-run",action="store_true"); ap.parse_args()
+    ap=argparse.ArgumentParser(); ap.add_argument("--dry-run",action="store_true")
+    args=ap.parse_args()
     log("="*60); log("Momentum LIVE signal (PAPER — no orders placed)")
     log("Building monthly panel from eod2 ...")
     close, turn = build_monthly()
@@ -167,9 +168,12 @@ def main():
     log(f"   {'cash':12s} {cash*100:5.1f}%")
     if picks: log(f"   momentum top-{TOP_N}: {', '.join(picks)}")
     else: log("   momentum: RISK-OFF (no stock picks this month)")
-    os.makedirs(os.path.dirname(SIGNAL_JSON), exist_ok=True)
-    with open(SIGNAL_JSON,"w") as f: json.dump(signal,f,indent=2)
-    log(f"Signal written to {SIGNAL_JSON}")
+    if not args.dry_run:
+        os.makedirs(os.path.dirname(SIGNAL_JSON), exist_ok=True)
+        with open(SIGNAL_JSON,"w") as f: json.dump(signal,f,indent=2)
+        log(f"Signal written to {SIGNAL_JSON}")
+    else:
+        log("DRY-RUN: signal NOT written")
     log("Done. PAPER mode — execute manually. No orders placed.")
 
 if __name__=="__main__": main()

@@ -127,7 +127,8 @@ def status():
     s3a={k:2*v for k,v in alloc.items()}
     if cash>0: s3a["cash"]=2*cash                     # 2x the whole book
     s4a=dict(sig4.get("allocation",{}))
-    s4c=sig4.get("cash",1.0); s4a["cash"]=s4c if s4c>0 else s4a.get("cash",0)
+    s4c=sig4.get("cash",1.0)
+    if s4c>0: s4a["cash"]=s4c
     s5a={"momentum":1.0}
     POS5={"s1":{"rows":fmt(s1a),"gross":round(sum(s1a.values())*100),"borrow":0,"picks":picks},
           "s2":{"rows":fmt(s2a),"gross":round(sum(s2a.values())*100),"borrow":30,"picks":picks},

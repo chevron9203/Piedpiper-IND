@@ -80,16 +80,32 @@ setTimeout(() => {
   const doc = dom.window.document;
   const sub = doc.getElementById('sub').textContent;
   const cards = doc.querySelectorAll('#syscards .scard').length;
-  const s1holdings = (doc.getElementById('view-s1')||{}).innerHTML || '';
-  const s4holdings = (doc.getElementById('view-s4')||{}).innerHTML || '';
   const fail = [];
 
-  if (errors.length)            fail.push('JS ERRORS:\n   ' + errors.join('\n   '));
-  if (sub.includes('loading'))  fail.push('subtitle stuck on "loading…" — JS never completed');
-  if (sub.includes('error'))    fail.push('subtitle shows error: ' + sub);
-  if (cards !== 5)              fail.push(`expected 5 system cards, got ${cards}`);
-  if (!s1holdings.includes('Holdings')) fail.push('System 1 tab did not render holdings');
-  if (!s4holdings.includes('Holdings')) fail.push('System 4 tab did not render holdings');
+  if (errors.length) fail.push('JS ERRORS:\n   ' + errors.join('\n   '));
+  if (sub.includes('loading')) fail.push('subtitle stuck on "loading…" — JS never completed');
+  if (sub.includes('error'))   fail.push('subtitle shows error: ' + sub);
+  if (cards !== 5)             fail.push(`expected 5 system cards, got ${cards}`);
+
+  // verify all 5 system tabs render holdings
+  ['s1','s2','s3','s4','s5'].forEach(id => {
+    const html = (doc.getElementById('view-'+id)||{}).innerHTML || '';
+    if (!html.includes('Holdings')) fail.push(`System ${id.toUpperCase()} tab did not render holdings`);
+  });
+
+  // verify S4/S5 picks appear in the rendered tab
+  const s4html = (doc.getElementById('view-s4')||{}).innerHTML || '';
+  const s5html = (doc.getElementById('view-s5')||{}).innerHTML || '';
+  if (!s4html.includes('A1')) fail.push('S4 momentum picks not displayed');
+  if (!s5html.includes('A1')) fail.push('S5 momentum picks not displayed');
+
+  // verify overview chart has 7 datasets' worth of color entries in the cmp section
+  const cmpBoxes = doc.querySelectorAll('#cmp-o .b').length;
+  if (cmpBoxes !== 7) fail.push(`expected 7 comparison boxes (5 systems + 2 benchmarks), got ${cmpBoxes}`);
+
+  // verify activity log renders something
+  const actHTML = doc.getElementById('activity').innerHTML || '';
+  if (!actHTML.includes('EOD')) fail.push('activity log did not render any entries');
 
   if (fail.length) {
     console.log('❌ DASHBOARD RENDER TEST FAILED');
@@ -98,7 +114,7 @@ setTimeout(() => {
   } else {
     console.log('✅ DASHBOARD RENDER TEST PASSED');
     console.log(`   subtitle: "${sub}"`);
-    console.log(`   system cards: ${cards} | S1 OK | S4 OK`);
+    console.log(`   system cards: ${cards} | all 5 tabs OK | cmp boxes: ${cmpBoxes}`);
     process.exit(0);
   }
 }, 800);

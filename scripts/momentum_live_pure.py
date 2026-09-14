@@ -130,11 +130,12 @@ def main():
     log(f"Regime: Nifty_uptrend={nifty_ok} breadth={breadth:.0%} → {'RISK-ON' if risk_on else 'RISK-OFF'}")
 
     asof_str = str(asof.date())
-    prev_s4  = _prev_picks(SIGNAL_S4, asof_str)
-    prev_s5  = _prev_picks(SIGNAL_S5, asof_str)
+    # rank buffer uses S5's prior picks (S5 is always invested, so its pick history
+    # is the most stable reference; S4 uses the same picks when it's risk-ON)
+    prev_picks = _prev_picks(SIGNAL_S5, asof_str)
 
-    # picks are the same universe; S5 always uses them, S4 only when risk-ON
-    picks = pick_stocks(close, turn, p, prev_s5, m3, m6, m12, vol, ma10)
+    # both systems share the same stock universe and pick logic
+    picks = pick_stocks(close, turn, p, prev_picks, m3, m6, m12, vol, ma10)
     log(f"Top-{TOP_N} pure MID-cap: {picks[:5]}{'...' if len(picks)>5 else ''}" if picks else "No picks found")
 
     entry = {s: eod2_close(s) for s in picks}
