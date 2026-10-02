@@ -17,6 +17,14 @@ LEDGER = LIVE/"ledger.json"               # paper book: holdings, pending orders
 NAV = LIVE/"nav.csv"                      # daily paper NAV
 SIGNAL = LIVE/"signal.json"               # latest weekly decision
 ALERTS = LIVE/"alerts.jsonl"              # watcher output
+# paper books run side by side on the same data/rules/costs; only the stock score differs
+BOOKS = {
+    "smart":    {"ledger": LEDGER, "nav": NAV, "signal": SIGNAL, "txt": LIVE/"signal.txt",
+                 "label": "smart v1.1 (50% ML + 50% momentum)"},
+    "momentum": {"ledger": LIVE/"ledger_momentum.json", "nav": LIVE/"nav_momentum.csv",
+                 "signal": LIVE/"signal_momentum.json", "txt": LIVE/"signal_momentum.txt",
+                 "label": "momentum only (comparison)"},
+}
 
 VERSION = "v1.1"     # v1.1: traded-price (not split-adjusted) for price floor + log_price; no insider features
 DROP = ("prom_net", "ins_net", "ins_buyers")   # NSE PIT insider feed empty since 2026-05

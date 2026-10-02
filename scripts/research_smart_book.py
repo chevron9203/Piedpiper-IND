@@ -69,8 +69,43 @@ def decide(s, w, Rres_win, top_n=20, exit_rank=100, sizing="eq", band=0.0, max_c
     return target
 
 
+def decide_flex(s, w, Rres_win, entry=0.93, exit=0.85, max_n=40, full_n=12, power=1.0,
+                max_w=0.15, max_corr=0.5, band=0.25, **_):
+    """Flexible book: hold EVERY stock whose blended score clears `entry` (kept while it
+    stays above `exit`), up to max_n, with the correlation cap. Weight ~ conviction
+    (score - exit)^power, capped at max_w. Fully invested once >= full_n names qualify;
+    with fewer, each name gets 1/full_n and the rest is cash ("only some when few are good")."""
+    keep = [x for x in w.index if x in s.index and s[x] >= exit]
+    cands = [x for x in s.index[s >= entry] if x not in keep]
+    chosen = list(keep)
+    if cands:
+        M = Rres_win[[x for x in keep + cands if x in Rres_win.columns]].corr(min_periods=60)
+        for x in cands:
+            if len(chosen) >= max_n: break
+            if chosen and x in M.index and M.loc[x, [c for c in chosen if c in M.columns]].max() > max_corr:
+                continue
+            chosen.append(x)
+    if not chosen:
+        return pd.Series(dtype=float)
+    conv = (s.reindex(chosen) - exit).clip(lower=1e-3)**power
+    invest = min(1.0, len(chosen)/full_n)
+    target = conv/conv.sum()*invest
+    for _ in range(10):                                    # cap and redistribute
+        over = target > max_w
+        if not over.any(): break
+        spare = (target[over] - max_w).sum(); target[over] = max_w
+        room = ~over
+        if room.any(): target[room] += spare*target[room]/target[room].sum()
+    target = target.clip(upper=max_w)
+    if band > 0:                                           # skip tiny re-trims
+        for x in keep:
+            if x in target.index and abs(target[x] - w[x]) <= band*target[x]:
+                target[x] = w[x]
+    return target
+
+
 def simulate_book(score, C, mkt, cost, top_n=20, exit_rank=100, sizing="eq", band=0.0,
-                  max_corr=None, corr_win=126, max_w=0.10, log=None, veto=None):
+                  max_corr=None, corr_win=126, max_w=0.10, log=None, veto=None, flex=None):
     """Decide at t, trade at t+1 close. Returns daily NAV and turnover/yr.
     veto: optional {date: set(sym)} -- red-flag names are never bought and are sold."""
     Cf = C.ffill(limit=5)
@@ -86,9 +121,12 @@ def simulate_book(score, C, mkt, cost, top_n=20, exit_rank=100, sizing="eq", ban
     w = pd.Series(dtype=float); turnover = 0.0
     for k, d in enumerate(sdates):
         i_d = idx.get_loc(d)
-        target = decide(by_date[d], w, Rres.iloc[max(0, i_d - corr_win + 1): i_d + 1], top_n, exit_rank,
-                        sizing, band, max_corr, max_w, vol.iloc[i_d],
-                        veto.get(d, set()) if veto is not None else frozenset())
+        if flex is not None:
+            target = decide_flex(by_date[d], w, Rres.iloc[max(0, i_d - corr_win + 1): i_d + 1], **flex)
+        else:
+            target = decide(by_date[d], w, Rres.iloc[max(0, i_d - corr_win + 1): i_d + 1], top_n, exit_rank,
+                            sizing, band, max_corr, max_w, vol.iloc[i_d],
+                            veto.get(d, set()) if veto is not None else frozenset())
         i0 = i_d + 1
         dwi = target.sub(w, fill_value=0).abs()
         ci = cost.iloc[i0].reindex(dwi.index).fillna(0.01)

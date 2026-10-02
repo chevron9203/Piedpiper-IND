@@ -15,7 +15,7 @@ from __future__ import annotations
 import json, re, sys, time
 import pandas as pd, requests
 
-from smart.config import ALERTS, BASE, LEDGER, LIVE, SIGNAL
+from smart.config import ALERTS, BASE, BOOKS, LIVE, SIGNAL
 
 sys.path.insert(0, str(BASE))
 from scripts.fetch_nse_events import API, get, new_session      # noqa: E402
@@ -61,7 +61,10 @@ def llm(sym, desc, text, key):
 
 
 def books():
-    held = set(json.loads(LEDGER.read_text())["holdings"]) if LEDGER.exists() else set()
+    held = set()
+    for B in BOOKS.values():                         # alert on holdings of every paper book
+        if B["ledger"].exists():
+            held |= set(json.loads(B["ledger"].read_text())["holdings"])
     watch = {x["sym"] for x in json.loads(SIGNAL.read_text()).get("top30", [])} if SIGNAL.exists() else set()
     return held, watch - held
 

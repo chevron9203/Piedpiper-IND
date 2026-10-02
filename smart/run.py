@@ -15,7 +15,7 @@ import argparse, json, os, subprocess, sys, time
 from pathlib import Path
 import numpy as np, pandas as pd
 
-from smart.config import (BASE, BOOK, CAPITAL, CORR_WIN, DATA, HORIZONS, LABELS, LEDGER, LIVE,
+from smart.config import (BASE, BOOK, BOOKS, CAPITAL, CORR_WIN, DATA, HORIZONS, LABELS, LEDGER, LIVE,
                           LOGS, NAV, SIGNAL, STORE)
 from smart import window as W
 
@@ -60,12 +60,16 @@ def is_week_end(d):
 
 
 # ---------------------------------------------------------------- ledger
-def load_ledger():
-    return json.loads(LEDGER.read_text())
+def load_ledger(book="smart"):
+    p = BOOKS[book]["ledger"]
+    if not p.exists():
+        return {"cash": CAPITAL, "holdings": {}, "pending": None, "start": None, "history": []}
+    return json.loads(p.read_text())
 
 
-def save_ledger(L):
-    tmp = LEDGER.with_suffix(".tmp"); tmp.write_text(json.dumps(L, indent=1)); tmp.replace(LEDGER)
+def save_ledger(L, book="smart"):
+    p = BOOKS[book]["ledger"]
+    tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps(L, indent=1)); tmp.replace(p)
 
 
 def nav_of(L):
@@ -148,19 +152,20 @@ def daily(a):
     st = W.load_state()
     if pd.Timestamp(st["asof"]) < day:
         st = W.roll_state(st, P); W.save_state(st)
-    L = load_ledger()
-    L = mark(L, P, day)
-    L, trades = fill(L, P, day)
-    save_ledger(L)
-    nav = nav_of(L)
-    new = not NAV.exists()
-    with open(NAV, "a") as f:
-        if new: f.write("date,nav,cash,n\n")
-        f.write(f"{day.date()},{nav:.2f},{L['cash']:.2f},{len(L['holdings'])}\n")
-    log(f"daily {day.date()}: NAV Rs {nav:,.0f} ({nav/CAPITAL - 1:+.2%}), {len(L['holdings'])} holdings, "
-        f"{len(trades)} paper fills")
-    if trades:
-        notify(f"smartpiper filled {len(trades)} paper orders at {day.date()} close. NAV Rs {nav:,.0f}")
+    for book, B in BOOKS.items():
+        L = load_ledger(book)
+        L = mark(L, P, day)
+        L, trades = fill(L, P, day)
+        save_ledger(L, book)
+        nav = nav_of(L)
+        new = not B["nav"].exists()
+        with open(B["nav"], "a") as f:
+            if new: f.write("date,nav,cash,n\n")
+            f.write(f"{day.date()},{nav:.2f},{L['cash']:.2f},{len(L['holdings'])}\n")
+        log(f"daily {day.date()} [{book}]: NAV Rs {nav:,.0f} ({nav/CAPITAL - 1:+.2%}), "
+            f"{len(L['holdings'])} holdings, {len(trades)} paper fills")
+        if trades and book == "smart":
+            notify(f"smartpiper filled {len(trades)} paper orders at {day.date()} close. NAV Rs {nav:,.0f}")
     if is_week_end(day) or a.force_weekly:
         weekly(a, P=P, st=st)
 
@@ -178,34 +183,40 @@ def weekly(a, P=None, st=None):
         store = pd.concat([store, X[store.columns].astype("float32")]).sort_index()
         store.to_parquet(STORE)
     del store
-    score = M.score(X)
-    L = load_ledger()
-    nav = nav_of(L)
-    w = pd.Series({s: h["value"]/nav for s, h in L["holdings"].items()}, dtype=float)
+    from scripts import research_smart_ml as SM
+    scores = {"smart": M.score(X),
+              "momentum": SM.rank_features(X)["mom_riskadj"].rank(pct=True).droplevel("date")
+                          .sort_values(ascending=False)}
     Rres = C.pct_change(fill_method=None).sub(mkt, axis=0).iloc[-CORR_WIN:]
-    target = decide(score, w, Rres, **BOOK)
-    rank = pd.Series(np.arange(1, len(score) + 1), index=score.index)
-    buys = [s for s in target.index if s not in w.index]
-    sells = [s for s in w.index if s not in target.index]
-    sig = {"decided": str(day.date()), "execute": "next trading day close", "nav": round(nav, 2),
-           "target": {s: round(float(v), 5) for s, v in target.items()},
-           "buys": [{"sym": s, "rank": int(rank[s]), "value": round(float(target[s])*nav)} for s in buys],
-           "sells": [{"sym": s, "rank": int(rank.get(s, -1)) if s in rank.index else None} for s in sells],
-           "holds": [s for s in target.index if s in w.index],
-           "top30": [{"sym": s, "score": round(float(score[s]), 4)} for s in score.index[:30]]}
-    SIGNAL.write_text(json.dumps(sig, indent=1))
-    # names the band left untouched are NOT re-trimmed at the fill either (they drift
-    # between decision and fill; trimming them back is exactly the churn the band removes)
-    band_hold = [x for x in target.index if x in w.index and target[x] == w[x]]
-    L["pending"] = {"decided": sig["decided"], "target": sig["target"], "hold": band_hold}
-    save_ledger(L)
-    txt = (f"smartpiper weekly signal {day.date()} (paper, execute next close)\n"
-           f"BUY ({len(buys)}): " + ", ".join(f"{b['sym']}#{b['rank']}" for b in sig["buys"]) + "\n"
-           f"SELL ({len(sells)}): " + ", ".join(sells) + "\n"
-           f"HOLD ({len(sig['holds'])}): " + ", ".join(sig["holds"]))
-    (LIVE/"signal.txt").write_text(txt + "\n")
-    log(txt.replace("\n", " | ") + f"  [{time.time()-t0:.0f}s]")
-    notify(txt)
+    for book, B in BOOKS.items():
+        score = scores[book]
+        L = load_ledger(book)
+        nav = nav_of(L)
+        w = pd.Series({s: h["value"]/nav for s, h in L["holdings"].items()}, dtype=float)
+        target = decide(score, w, Rres, **BOOK)
+        rank = pd.Series(np.arange(1, len(score) + 1), index=score.index)
+        buys = [s for s in target.index if s not in w.index]
+        sells = [s for s in w.index if s not in target.index]
+        sig = {"book": book, "decided": str(day.date()), "execute": "next trading day close", "nav": round(nav, 2),
+               "target": {s: round(float(v), 5) for s, v in target.items()},
+               "buys": [{"sym": s, "rank": int(rank[s]), "value": round(float(target[s])*nav)} for s in buys],
+               "sells": [{"sym": s, "rank": int(rank.get(s, -1)) if s in rank.index else None} for s in sells],
+               "holds": [s for s in target.index if s in w.index],
+               "top30": [{"sym": s, "score": round(float(score[s]), 4)} for s in score.index[:30]]}
+        B["signal"].write_text(json.dumps(sig, indent=1))
+        # names the band left untouched are NOT re-trimmed at the fill either (they drift
+        # between decision and fill; trimming them back is exactly the churn the band removes)
+        band_hold = [x for x in target.index if x in w.index and target[x] == w[x]]
+        L["pending"] = {"decided": sig["decided"], "target": sig["target"], "hold": band_hold}
+        save_ledger(L, book)
+        txt = (f"{book} weekly signal {day.date()} (paper, execute next close)\n"
+               f"BUY ({len(buys)}): " + ", ".join(f"{b['sym']}#{b['rank']}" for b in sig["buys"]) + "\n"
+               f"SELL ({len(sells)}): " + ", ".join(sells) + "\n"
+               f"HOLD ({len(sig['holds'])}): " + ", ".join(sig["holds"]))
+        B["txt"].write_text(txt + "\n")
+        log(txt.replace("\n", " | ") + f"  [{time.time()-t0:.0f}s]")
+        if book == "smart":
+            notify(txt)
 
 
 def monthly(a):
@@ -229,14 +240,15 @@ def monthly(a):
 
 
 def status(a):
-    L = load_ledger(); nav = nav_of(L)
-    print(f"paper NAV Rs {nav:,.0f} ({nav/CAPITAL - 1:+.2%}) since {L.get('start')}, cash Rs {L['cash']:,.0f}")
-    for s, h in sorted(L["holdings"].items(), key=lambda x: -x[1]["value"]):
-        print(f"  {s:<12} Rs {h['value']:>9,.0f}  since {h['entry']}  marked {h['marked']}")
-    if L.get("pending"):
-        print(f"pending orders decided {L['pending']['decided']} ({len(L['pending']['target'])} names)")
-    if (LIVE/"signal.txt").exists():
-        print((LIVE/"signal.txt").read_text())
+    for book, B in BOOKS.items():
+        L = load_ledger(book); nav = nav_of(L)
+        print(f"[{book}] paper NAV Rs {nav:,.0f} ({nav/CAPITAL - 1:+.2%}) since {L.get('start')}, cash Rs {L['cash']:,.0f}")
+        for s, h in sorted(L["holdings"].items(), key=lambda x: -x[1]["value"]):
+            print(f"  {s:<12} Rs {h['value']:>9,.0f}  since {h['entry']}  marked {h['marked']}")
+        if L.get("pending"):
+            print(f"  pending orders decided {L['pending']['decided']} ({len(L['pending']['target'])} names)")
+        if B["txt"].exists():
+            print("  " + B["txt"].read_text().replace("\n", "\n  "))
 
 
 def main():

@@ -228,7 +228,7 @@ def forward_returns(C, dates, h):
 
 
 # ---------------------------------------------------------------- model
-def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,)):
+def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,), lambdarank=False):
     import lightgbm as lgb
     df = X.join(y, how="inner")
     df["target"] = df.groupby(level="date")["fwd"].rank(pct=True)
@@ -252,9 +252,18 @@ def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,)):
             age = (start - tr.index.get_level_values("date")).days.values/365.25
             wt = 0.5**(age/halflife)
         ps = []
+        if lambdarank:                # optimise the TOP of each date's list (we only buy 20)
+            tr = tr.sort_index(level="date")
+            grp = tr.groupby(level="date", sort=False).size().values
+            rel = np.minimum((tr["target"]*30).astype(int), 29)        # 30 relevance grades
         for sd in seeds:
-            m = lgb.train({**params, "seed": sd}, lgb.Dataset(tr[feats], tr["target"], weight=wt),
-                          num_boost_round=400)
+            if lambdarank:
+                m = lgb.train({**params, "seed": sd, "objective": "lambdarank", "lambdarank_truncation_level": 60,
+                               "label_gain": list(range(30)), "eval_at": [20]},
+                              lgb.Dataset(tr[feats], rel, group=grp), num_boost_round=400)
+            else:
+                m = lgb.train({**params, "seed": sd}, lgb.Dataset(tr[feats], tr["target"], weight=wt),
+                              num_boost_round=400)
             ps.append(m.predict(te[feats]))
         p = pd.Series(np.mean(ps, axis=0), index=te.index, name="pred")
         preds.append(p)
@@ -386,6 +395,8 @@ def main():
                     help="drop insider/promoter features (NSE PIT feed empty since 2026-05)")
     ap.add_argument("--halflife", type=float, default=None, help="recency weight half-life, years")
     ap.add_argument("--seeds", type=int, default=1, help="average this many LightGBM seeds")
+    ap.add_argument("--no-mkt", action="store_true", help="drop market-state features (m_*)")
+    ap.add_argument("--lambdarank", action="store_true", help="LambdaRank objective (top-of-list)")
     ap.add_argument("--shuffle", action="store_true",
                     help="AUDIT: permute labels across stocks within each date; any edge left = leak")
     a = ap.parse_args()
@@ -406,6 +417,8 @@ def main():
         SPARSE_RAW.update({"prom_net", "ins_net", "ins_buyers"})
     if a.no_insider:
         X = X.drop(columns=[c for c in ("prom_net", "ins_net", "ins_buyers") if c in X.columns])
+    if a.no_mkt:
+        X = X.drop(columns=[c for c in X.columns if c.startswith("m_")])
     print(f"features {X.shape} in {time.time()-t0:.0f}s")
     Xr = rank_features(X)
     y = forward_returns(C, Xr.index.get_level_values("date").unique(), a.h)
@@ -413,7 +426,7 @@ def main():
         rng = np.random.default_rng(0)
         y = y.groupby(level="date", group_keys=False).apply(
             lambda g: pd.Series(rng.permutation(g.values), index=g.index)).rename("fwd")
-    pred, imp = walk_forward(Xr, y, a.h, a.step, C.index, a.halflife, tuple(range(7, 7 + a.seeds)))
+    pred, imp = walk_forward(Xr, y, a.h, a.step, C.index, a.halflife, tuple(range(7, 7 + a.seeds)), a.lambdarank)
     print(f"model done {time.time()-t0:.0f}s\n")
     yt = y[y.index.get_level_values("date").year >= TEST_FROM]
     print(f"== IC / top-decile, OOS {TEST_FROM}+, horizon {a.h}d (walk-forward) ==")
@@ -447,7 +460,7 @@ def main():
     yr.iloc[0] = out.resample("YE").last().iloc[0]/out.iloc[0] - 1
     print("\n== by calendar year ==")
     print((yr*100).round(1).rename(index=lambda d: d.year).to_string())
-    tag = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_fo" if a.fo else "") + ("_fd" if a.fund else "") + ("_an" if a.ann else "") + ("_rs" if a.raw_sparse else "") + ("_ni" if a.no_insider else "") + "_px" + ("_shuf" if a.shuffle else "") \
+    tag = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_fo" if a.fo else "") + ("_fd" if a.fund else "") + ("_an" if a.ann else "") + ("_rs" if a.raw_sparse else "") + ("_ni" if a.no_insider else "") + ("_nm" if a.no_mkt else "") + ("_lr" if a.lambdarank else "") + "_px" + ("_shuf" if a.shuffle else "") \
         + (f"_hl{a.halflife:g}" if a.halflife else "") + (f"_x{a.seeds}" if a.seeds > 1 else "")
     out.to_parquet(BASE/f"data_store/smart_ml_nav_{tag}.parquet")
     pred.to_frame().to_parquet(BASE/f"data_store/smart_ml_pred_{tag}.parquet")
