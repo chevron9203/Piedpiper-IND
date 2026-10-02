@@ -235,6 +235,9 @@ def backtest_orb_on_candles(
     trail2:           bool  = True,
     direction:        str   = "LONG",  # "LONG" or "SHORT"
     stock_ema_filter: bool  = True,    # only trade in direction of stock's own EMA20
+    slippage_pct:     float = 0.0,     # adverse per-side slippage on MARKET fills (entry/stop/squareoff)
+    gap_through:      bool  = False,   # stops fill at bar OPEN when price gapped through the stop
+    entry_limit:      bool  = False,   # patient limit entry at trigger (no entry slippage, but misses runaway breakouts)
 ) -> pd.DataFrame:
     """
     Simulate ORB on historical 15-min bars for one symbol.
@@ -406,7 +409,9 @@ def backtest_orb_on_candles(
 
             if bar_time >= SQUAREOFF:
                 if filled:
-                    exit_price, exit_time, exit_reason = float(bar["open"]), bar_ts, "squareoff"
+                    px = float(bar["open"])
+                    px = px * (1 - slippage_pct) if not is_short else px * (1 + slippage_pct)
+                    exit_price, exit_time, exit_reason = px, bar_ts, "squareoff"
                 break
 
             bar_low  = float(bar["low"])
@@ -416,12 +421,22 @@ def backtest_orb_on_candles(
                 if bar_time >= ENTRY_CUTOFF:
                     break
                 if (not is_short and bar_high >= entry) or (is_short and bar_low <= entry):
-                    filled, entry_price, entry_time = True, entry, bar_ts
+                    if entry_limit:
+                        # Resting limit at the trigger: fills only if price trades back to it
+                        # this bar; a runaway breakout (never returns to trigger) is MISSED.
+                        touched = (bar_low <= entry) if not is_short else (bar_high >= entry)
+                        if not touched:
+                            break
+                        fill = entry
+                    else:
+                        fill = entry * (1 + slippage_pct) if not is_short else entry * (1 - slippage_pct)
+                    filled, entry_price, entry_time = True, fill, bar_ts
                     trail_stop = stop
             else:
                 if is_short:
                     if bar_high >= trail_stop:
-                        exit_price, exit_time, exit_reason = trail_stop, bar_ts, "stop"; break
+                        px = float(bar["open"]) if (gap_through and float(bar["open"]) > trail_stop) else trail_stop
+                        exit_price, exit_time, exit_reason = px * (1 + slippage_pct), bar_ts, "stop"; break
                     if bar_low <= target:
                         exit_price, exit_time, exit_reason = target, bar_ts, "target"; break
                     if trail2:
@@ -435,7 +450,8 @@ def backtest_orb_on_candles(
                                 trail_stop = entry_price
                 else:
                     if bar_low <= trail_stop:
-                        exit_price, exit_time, exit_reason = trail_stop, bar_ts, "stop"; break
+                        px = float(bar["open"]) if (gap_through and float(bar["open"]) < trail_stop) else trail_stop
+                        exit_price, exit_time, exit_reason = px * (1 - slippage_pct), bar_ts, "stop"; break
                     if bar_high >= target:
                         exit_price, exit_time, exit_reason = target, bar_ts, "target"; break
                     if trail2:

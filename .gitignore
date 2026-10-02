@@ -25,3 +25,6 @@ ssh-key-*
 
 # Local Claude Code agent state
 .claude/
+
+# TimesFM experiment venv (separate from .venv so live/backtest deps stay untouched)
+.venv-timesfm/

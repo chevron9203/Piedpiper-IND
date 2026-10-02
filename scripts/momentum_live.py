@@ -27,8 +27,13 @@ def log(msg):
     print(f"{datetime.now():%Y-%m-%d %H:%M:%S} | {msg}", flush=True)
 
 def build_monthly():
-    """Build monthly close + turnover panels from eod2 daily CSVs (latest data)."""
-    closes, turns = {}, {}
+    """Build monthly close + turnover panels from eod2 daily CSVs (latest data).
+
+    Also returns the latest RAW daily date seen. resample("ME") silently labels the
+    last available bar as the month-end, so if the EOD feed is a day late the whole
+    signal is built off the wrong close without any visible symptom — the caller
+    must check this against the true month-end before trusting the panel."""
+    closes, turns = {}, {}; last_daily=None
     for f in glob.glob(f"{DAILY}/*.csv"):
         sym=Path(f).stem.upper()
         try: d=pd.read_csv(f, usecols=["Date","Close","Volume","Series"])
@@ -36,10 +41,43 @@ def build_monthly():
         d=d[d["Series"]=="EQ"]
         if len(d)<260: continue
         d["Date"]=pd.to_datetime(d["Date"]); d=d.set_index("Date").sort_index()
+        if last_daily is None or d.index[-1]>last_daily: last_daily=d.index[-1]
         closes[sym]=d["Close"].resample("ME").last()
         turns[sym]=(d["Close"]*d["Volume"]).resample("ME").mean()
     close=pd.DataFrame(closes).sort_index(); turn=pd.DataFrame(turns).reindex(close.index)
-    return close, turn
+    return close, turn, last_daily
+
+def _last_trading_day(asof):
+    """The true final TRADING day of asof's month (month-end may be a weekend/holiday)."""
+    try:
+        hol = set(json.load(open("data_store/nse_holidays.json")))
+    except Exception:
+        hol = set()
+    d = pd.Timestamp(asof)
+    for _ in range(10):
+        if d.weekday() < 5 and d.strftime("%Y-%m-%d") not in hol:
+            return d
+        d -= pd.Timedelta(days=1)
+    return d
+
+def assert_month_complete(asof, last_daily):
+    """Abort rather than emit a signal built on an incomplete final month.
+
+    resample("ME") labels whatever bar it last saw as the month-end, so a stalled
+    EOD feed silently ranks the universe on the 29th's closes and stamps it the 30th
+    -- different picks, no warning. Comparing against the true last TRADING day (not
+    a raw business-day gap) is what distinguishes "month ended on a Saturday" from
+    "the feed missed Wednesday". A missed month is recoverable; a wrong month is not."""
+    if last_daily is None:
+        raise SystemExit("ABORT: no daily data available to validate month completeness")
+    ltd = _last_trading_day(asof)
+    if pd.Timestamp(last_daily).normalize() < ltd.normalize():
+        raise SystemExit(
+            f"ABORT: month-end data incomplete -- newest bar {pd.Timestamp(last_daily).date()} "
+            f"is before the month's last trading day {ltd.date()} (month-end {pd.Timestamp(asof).date()}). "
+            f"Re-run once the EOD feed catches up.")
+    log(f"Month-end data check OK (newest bar {pd.Timestamp(last_daily).date()} >= "
+        f"last trading day {ltd.date()})")
 
 def load_nifty():
     import duckdb
@@ -119,7 +157,7 @@ def main():
     args=ap.parse_args()
     log("="*60); log("Momentum LIVE signal (PAPER — no orders placed)")
     log("Building monthly panel from eod2 ...")
-    close, turn = build_monthly()
+    close, turn, last_daily = build_monthly()
     # use only FULLY-COMPLETE months (drop the current, in-progress month)
     cur = pd.Timestamp.now().to_period("M")
     keep = close.index.to_period("M") < cur
@@ -127,6 +165,7 @@ def main():
     nifty = load_nifty()
     p = len(close.index)-1                      # last completed month
     asof = close.index[p]
+    assert_month_complete(asof, last_daily)
     log(f"As-of month: {asof.date()} | universe {close.shape[1]} stocks")
 
     nifty_ok, breadth, risk_on = regime_ok(close, turn, nifty, p)

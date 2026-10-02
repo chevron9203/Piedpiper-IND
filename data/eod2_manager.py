@@ -25,10 +25,19 @@ EOD2_DAILY_DIR = EOD2_DIR / "src" / "eod2_data" / "daily"
 
 
 def _eod2_csv_path(symbol: str) -> Path:
-    """Resolve the path to EOD2's CSV for a given symbol."""
-    # EOD2 stores files as SYMBOL.csv (uppercase, no -EQ suffix)
-    sym = symbol.upper().replace("-EQ", "")
-    return EOD2_DAILY_DIR / f"{sym}.csv"
+    """Resolve the path to EOD2's CSV for a given symbol.
+
+    EOD2 writes LOWERCASE filenames (reliance.csv, no -EQ suffix). This used to
+    build an uppercase name, which still resolved on macOS (case-insensitive FS)
+    but matched nothing on the Linux box -- so every universe symbol silently
+    "went missing" and adjusted_ohlcv froze. Try lowercase first, then uppercase,
+    so it works on either filesystem regardless of how EOD2 names things."""
+    sym = symbol.replace("-EQ", "").replace("-eq", "")
+    lower = EOD2_DAILY_DIR / f"{sym.lower()}.csv"
+    if lower.exists():
+        return lower
+    upper = EOD2_DAILY_DIR / f"{sym.upper()}.csv"
+    return upper if upper.exists() else lower
 
 
 def is_eod2_available() -> bool:
