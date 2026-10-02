@@ -22,11 +22,12 @@ sys.path.insert(0, str(BASE))
 from scripts import research_smart_ml as SM
 from scripts import research_smart_iter as IT
 
-ML_TAGS = ("h10_s5_ev_pr_x3", "h21_s5_ev_pr_x3", "h63_s5_ev_pr_x3")   # 3-seed ensembles (iteration 6)
-MOM_W = 0.25; TOP = 20; EXIT = 100; STEP = 5
+ML_TAGS = ("h10_s5_ev_pr_ni_px_x3", "h21_s5_ev_pr_ni_px_x3", "h63_s5_ev_pr_ni_px_x3")   # v1.1: traded-price fix, no insider
+MOM_W = 0.50; TOP = 20; EXIT = 100; STEP = 5
 
 
-def best_score(Xr, tags=ML_TAGS):
+def best_score(Xr, tags=None):
+    tags = ML_TAGS if tags is None else tags     # resolved at CALL time (a default arg froze stale tags once)
     comp = [IT.xs(pd.read_parquet(BASE/f"data_store/smart_ml_pred_{t}.parquet")["pred"]) for t in tags]
     ml = sum(comp)/len(comp)
     mom = IT.xs(Xr["mom_riskadj"]).reindex(ml.index)

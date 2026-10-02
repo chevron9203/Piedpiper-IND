@@ -86,12 +86,14 @@ def parse(path):
     # the reporting-quarter context: the duration context ending on DateOfEndOfReportingPeriod
     end = re.search(r"DateOfEndOfReportingPeriod[^>]*>([\d-]+)<", t)
     ctxs = re.findall(r'<xbrli:context id="([^"]+)">.*?<xbrli:endDate>([\d-]+)</xbrli:endDate>', t, re.S)
-    want = {c for c, e in ctxs if end and e == end.group(1)} or {"OneD"}
+    # "OneD" is the reporting-quarter context in NSE's Ind-AS/banking filings; matching on
+    # end date alone picked up only sub-contexts (OneOperatingExpenses01D...) and missed it
+    want = ["OneD"] + [c for c, e in ctxs if end and e == end.group(1) and c != "OneD"]
     rec = {}
     for k, tags in FIELDS.items():
         for tg in tags:
-            m = re.findall(rf'<in-bse-fin:{tg}\b[^>]*contextRef="([^"]+)"[^>]*>([-\d.Ee]+)<', t)
-            vals = [float(v) for c, v in m if c in want]
+            m = dict(re.findall(rf'<in-bse-fin:{tg}\b[^>]*contextRef="([^"]+)"[^>]*>([-\d.Ee]+)<', t)[::-1])
+            vals = [float(m[c]) for c in want if c in m]
             if vals:
                 rec[k] = vals[0]; break
     rec["file"] = Path(path).name

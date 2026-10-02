@@ -18,7 +18,7 @@ sys.path.insert(0, str(BASE))
 from scripts import build_nse_panel as BP                 # noqa: E402
 from scripts.research_tranching import is_stock           # noqa: E402
 
-FIELDS = ("open", "high", "low", "close", "vol", "turn", "trades", "dlv", "t2t")
+FIELDS = ("open", "high", "low", "close", "vol", "turn", "trades", "dlv", "t2t", "ca_factor")
 
 
 def trading_files(asof=None):

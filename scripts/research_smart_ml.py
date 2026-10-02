@@ -42,7 +42,21 @@ def load_panel():
     p = pd.read_parquet(PANEL)
     etf = etf_symbols()
     syms = [s for s in p["close"].columns if s not in etf and is_stock(s)]
-    return {k: p[k][syms] for k in ("open","high","low","close","vol","turn","trades","dlv","t2t")}
+    return {k: p[k][syms] for k in ("open","high","low","close","vol","turn","trades","dlv","t2t","ca_factor")}
+
+
+def traded_price(P):
+    """Price actually traded that day. Panel prices are back-adjusted for LATER splits and
+    bonuses: fine for every ratio feature, but a price LEVEL then carries the future (a stock
+    that will split 1:10 looks 10x cheaper years before it happens). 22.8% of universe days
+    were >5% off and 295k stock-days were wrongly cut by the Rs-20 floor (audit 2026-10-03).
+    The live window only knows past actions, so this is also what live sees."""
+    C = P["close"]
+    if "ca_factor" not in P:
+        return C
+    f = P["ca_factor"].reindex(index=C.index, columns=C.columns).fillna(1.0)
+    after = f.iloc[::-1].cumprod().iloc[::-1]/f          # product of factors strictly after t
+    return C/after
 
 
 def xs_rank(df):
@@ -59,7 +73,7 @@ def base(P, age_offset=None):
     age = alive.cumsum()
     if age_offset is not None:              # live: trading days listed BEFORE the price window
         age = age + age_offset.reindex(age.columns).fillna(0).values
-    elig = (age >= MIN_AGE) & (C >= PRICE_MIN) & alive & turn60.notna()
+    elig = (age >= MIN_AGE) & (traded_price(P).ffill(limit=5) >= PRICE_MIN) & alive & turn60.notna()
     trank = turn60.where(elig).rank(axis=1, ascending=False)
     univ = elig & (trank <= UNIV)
     # market = equal-weight universe return (cap-agnostic, exists for the whole sample)
@@ -146,7 +160,7 @@ def compute_features(P, step, dates=None, age_offset=None, use_cache=True):
     F["t2t"] = P["t2t"].fillna(0)
     F["t2t_days63"] = P["t2t"].fillna(0).rolling(63, min_periods=1).sum()
     F["log_age"] = np.log1p(age)
-    F["log_price"] = np.log(C)
+    F["log_price"] = np.log(traded_price(P).ffill(limit=5))
 
     # sample on decision dates only (every `step` days) -> long format
     dates = C.index[260::step] if dates is None else pd.DatetimeIndex(dates)
@@ -368,6 +382,8 @@ def main():
     ap.add_argument("--fund", action="store_true", help="add XBRL fundamental features (2019+)")
     ap.add_argument("--ann", action="store_true", help="add corporate-announcement event features")
     ap.add_argument("--raw-sparse", action="store_true", help="keep insider/promoter flows unranked")
+    ap.add_argument("--no-insider", action="store_true",
+                    help="drop insider/promoter features (NSE PIT feed empty since 2026-05)")
     ap.add_argument("--halflife", type=float, default=None, help="recency weight half-life, years")
     ap.add_argument("--seeds", type=int, default=1, help="average this many LightGBM seeds")
     ap.add_argument("--shuffle", action="store_true",
@@ -388,6 +404,8 @@ def main():
         X = X.join(pd.read_parquet(BASE/f"data_store/smart_ann_s{a.step}.parquet"))
     if a.raw_sparse:
         SPARSE_RAW.update({"prom_net", "ins_net", "ins_buyers"})
+    if a.no_insider:
+        X = X.drop(columns=[c for c in ("prom_net", "ins_net", "ins_buyers") if c in X.columns])
     print(f"features {X.shape} in {time.time()-t0:.0f}s")
     Xr = rank_features(X)
     y = forward_returns(C, Xr.index.get_level_values("date").unique(), a.h)
@@ -406,7 +424,7 @@ def main():
     if a.fo: singles += ["oi_chg21", "oi_px5", "basis_ann", "pcr", "fut_spec"]
     if a.fund: singles += ["rev_yoy", "pat_yoy", "opm_chg", "sue", "rev_accel"]
     if a.ann: singles += ["ann_pledge", "ann_default", "ann_clarify", "ann_fund_raise"]
-    for f in singles:
+    for f in [f for f in singles if f in Xr.columns]:
         sgn = -1 if f in ("max5", "ivol63") else 1
         ic_report(sgn*Xr.loc[Xr.index.get_level_values("date").year >= TEST_FROM, f], yt, f + ("(-)" if sgn < 0 else ""))
     print("\n== feature importance (mean gain share, top 20) ==")
@@ -429,7 +447,7 @@ def main():
     yr.iloc[0] = out.resample("YE").last().iloc[0]/out.iloc[0] - 1
     print("\n== by calendar year ==")
     print((yr*100).round(1).rename(index=lambda d: d.year).to_string())
-    tag = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_fo" if a.fo else "") + ("_fd" if a.fund else "") + ("_an" if a.ann else "") + ("_rs" if a.raw_sparse else "") + ("_shuf" if a.shuffle else "") \
+    tag = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_fo" if a.fo else "") + ("_fd" if a.fund else "") + ("_an" if a.ann else "") + ("_rs" if a.raw_sparse else "") + ("_ni" if a.no_insider else "") + "_px" + ("_shuf" if a.shuffle else "") \
         + (f"_hl{a.halflife:g}" if a.halflife else "") + (f"_x{a.seeds}" if a.seeds > 1 else "")
     out.to_parquet(BASE/f"data_store/smart_ml_nav_{tag}.parquet")
     pred.to_frame().to_parquet(BASE/f"data_store/smart_ml_pred_{tag}.parquet")

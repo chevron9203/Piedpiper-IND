@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import pandas as pd
 
-from smart.config import BASE, STEP
+from smart.config import BASE, DROP, STEP
 
 sys.path.insert(0, str(BASE))
 from scripts import research_smart_ml as SM          # noqa: E402
@@ -17,4 +17,5 @@ def rows(P, dates, offset):
     X, C, univ, mkt = SM.compute_features(P, STEP, dates=dates, age_offset=offset, use_cache=False)
     E = EV.build(STEP, P=P, dates=dates, age_offset=offset, save=False)[0]   # (features, events, insider)
     F = PR.build(STEP, feats=(X, C, univ, mkt), save=False)
-    return X.join(E).join(F), C, univ, mkt
+    X = X.join(E).join(F)
+    return X.drop(columns=[c for c in DROP if c in X.columns]), C, univ, mkt

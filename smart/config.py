@@ -18,11 +18,13 @@ NAV = LIVE/"nav.csv"                      # daily paper NAV
 SIGNAL = LIVE/"signal.json"               # latest weekly decision
 ALERTS = LIVE/"alerts.jsonl"              # watcher output
 
+VERSION = "v1.1"     # v1.1: traded-price (not split-adjusted) for price floor + log_price; no insider features
+DROP = ("prom_net", "ins_net", "ins_buyers")   # NSE PIT insider feed empty since 2026-05
 STEP = 5
 WINDOW = 450                              # trading days of prices kept in memory
 HORIZONS = (10, 21, 63)
 SEEDS = (7, 8, 9)
-MOM_W = 0.25
+MOM_W = 0.50                              # v1.1: 50/50 chosen on DEV after the price-level leak fix
 BOOK = dict(top_n=20, exit_rank=100, band=0.25, max_corr=0.5)
 CORR_WIN = 126
 CAPITAL = 200_000.0                       # paper capital (Rs)

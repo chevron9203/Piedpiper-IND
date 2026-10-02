@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse, json, sys
 import pandas as pd
 
-from smart.config import BASE, CAPITAL, HORIZONS, LABELS, LEDGER, LIVE, STORE
+from smart.config import BASE, CAPITAL, DROP, HORIZONS, LABELS, LEDGER, LIVE, STORE
 
 sys.path.insert(0, str(BASE))
 from scripts import research_smart_ml as SM          # noqa: E402
@@ -21,7 +21,7 @@ def build_store():
     X = pd.read_parquet(D/"smart_features_s5.parquet") \
           .join(pd.read_parquet(D/"smart_events_s5.parquet")) \
           .join(pd.read_parquet(D/"smart_peers_s5.parquet"))
-    return X.astype("float32")
+    return X.drop(columns=[c for c in DROP if c in X.columns]).astype("float32")
 
 
 def main():

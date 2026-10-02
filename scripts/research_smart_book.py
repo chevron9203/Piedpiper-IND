@@ -155,7 +155,7 @@ def cmd_final(a):
     mnav, mto = simulate_book(mom, C, mkt, cm, **FINAL)
     ew = (1 + mkt.loc[nav.index[0]:].fillna(0)).cumprod()
     n5 = n500.reindex(nav.index).ffill().dropna(); n5 = n5/n5.iloc[0]
-    print(f"== final system: 75% ML(h10+h21+h63, events+peers) + 25% momentum, top {20}, weekly, "
+    print(f"== final system: {1 - A.MOM_W:.0%} ML(h10+h21+h63, events+peers) + {A.MOM_W:.0%} momentum, top {20}, weekly, "
           f"band 0.25, corr cap 0.5, Rs{a.capital/1e5:.0f}L per-stock costs ==")
     print(f"{'':28}  dev 2013-22 CAGR/DD/Sh    holdout 2023-26 CAGR/DD/Sh")
     for name, n in (("SMART SYSTEM", nav), ("momentum (same rules)", mnav), ("equal-wt universe", ew), ("Nifty 500 (price)", n5)):
