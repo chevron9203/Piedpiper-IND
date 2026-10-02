@@ -1,0 +1,16 @@
+[Unit]
+Description=smartpiper dashboard (read-only, localhost:5010 only)
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/smartpiper
+ExecStart=/home/ubuntu/smartpiper/.venv/bin/python -m smart.dashboard
+Restart=always
+RestartSec=30
+MemoryMax=300M
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

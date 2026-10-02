@@ -1,0 +1,16 @@
+[Unit]
+Description=smartpiper daily: NSE data, paper fills, NAV (+ weekly signal on week end)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/smartpiper
+ExecStart=/home/ubuntu/smartpiper/.venv/bin/python -m smart.run daily
+StandardOutput=append:/home/ubuntu/smartpiper/logs/daily.log
+StandardError=append:/home/ubuntu/smartpiper/logs/daily.log
+# hard isolation from the existing piedpiper system on this 1-CPU / 5.8 GB box
+MemoryMax=2500M
+CPUWeight=20
+Nice=10
+TimeoutStartSec=2h

@@ -1,0 +1,6 @@
+# pinned to the research environment (Mac) so live == backtest maths
+pandas==3.0.5
+numpy==2.5.2
+pyarrow==25.0.1
+lightgbm==4.7.0
+requests==2.34.2

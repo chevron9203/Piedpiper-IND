@@ -1,0 +1,15 @@
+[Unit]
+Description=smartpiper monthly: label elapsed rows + retrain 3 horizons x 3 seeds
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/smartpiper
+ExecStart=/home/ubuntu/smartpiper/.venv/bin/python -m smart.run monthly
+StandardOutput=append:/home/ubuntu/smartpiper/logs/monthly.log
+StandardError=append:/home/ubuntu/smartpiper/logs/monthly.log
+MemoryMax=3000M
+CPUWeight=10
+Nice=15
+TimeoutStartSec=4h
