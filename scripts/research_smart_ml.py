@@ -33,6 +33,7 @@ UNIV = 800; PRICE_MIN = 20.0; MIN_AGE = 250
 RT = 2*(0.0010+0.0010)+0.0005        # same round-trip cost as the deployed research
 DEAD_HAIRCUT = 0.30
 TEST_FROM = 2013
+TEST_TO = 9999
 
 
 # ---------------------------------------------------------------- data
@@ -228,23 +229,32 @@ def forward_returns(C, dates, h):
 
 
 # ---------------------------------------------------------------- model
-def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,), lambdarank=False):
+def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,), lambdarank=False, tmode="rank", train_dates=None):
     import lightgbm as lgb
     df = X.join(y, how="inner")
     df["target"] = df.groupby(level="date")["fwd"].rank(pct=True)
+    if tmode == "topq":          # right-tail classifier: lands in the top 10% of the day
+        df["target"] = (df["target"] >= 0.90).astype(float)
+    elif tmode == "winsor":      # SIZE of the move, robustly scaled and capped (big winners count)
+        g = df.groupby(level="date")["fwd"]
+        med = g.transform("median"); mad = (df["fwd"] - med).abs().groupby(level="date").transform("median")
+        df["target"] = ((df["fwd"] - med)/(1.4826*mad.replace(0, np.nan))).clip(-3, 3).fillna(0.0)
     feats = [c for c in X.columns]
     dates = df.index.get_level_values("date")
     preds = []; imps = []
-    params = dict(objective="regression", learning_rate=0.03, num_leaves=31,
+    params = dict(objective="binary" if tmode == "topq" else "regression", learning_rate=0.03, num_leaves=31,
                   min_data_in_leaf=400, feature_fraction=0.7, bagging_fraction=0.7,
                   bagging_freq=1, lambda_l2=10.0, verbose=-1, num_threads=8, seed=7)
-    for yr in range(TEST_FROM, dates.max().year + 1):
+    for yr in range(TEST_FROM, min(dates.max().year, TEST_TO) + 1):
         start = pd.Timestamp(f"{yr}-01-01")
         # purge in TRADING days: a training row's label ends at cal[pos+1+h]; it must end
         # before the test year starts (BDay ignored NSE holidays -> a few days of leak)
         first = cal.searchsorted(start)
         purge = cal[max(first - h - 2, 0)]
-        tr = df[dates < purge]; te = df[(dates >= start) & (dates < pd.Timestamp(f"{yr+1}-01-01"))]
+        trm = dates < purge
+        if train_dates is not None:       # daily predictions, but train on the same sparse grid as v1.1
+            trm = trm & dates.isin(train_dates)
+        tr = df[trm]; te = df[(dates >= start) & (dates < pd.Timestamp(f"{yr+1}-01-01"))]
         if len(te) == 0: continue
         # recency weighting: the edge decays as the market learns -- let recent years count more
         wt = None
@@ -396,23 +406,33 @@ def main():
     ap.add_argument("--halflife", type=float, default=None, help="recency weight half-life, years")
     ap.add_argument("--seeds", type=int, default=1, help="average this many LightGBM seeds")
     ap.add_argument("--no-mkt", action="store_true", help="drop market-state features (m_*)")
+    ap.add_argument("--target", default="rank", choices=["rank", "topq", "winsor"], help="training target")
+    ap.add_argument("--predict-all", action="store_true",
+                    help="features for EVERY trading day (step 1); train on the every-5th-day grid, predict all days")
+    ap.add_argument("--preds-only", action="store_true", help="stop after saving predictions")
+    ap.add_argument("--test-from", type=int, default=None, help="first walk-forward test year (default 2013)")
+    ap.add_argument("--test-to", type=int, default=None, help="last walk-forward test year")
     ap.add_argument("--lambdarank", action="store_true", help="LambdaRank objective (top-of-list)")
     ap.add_argument("--shuffle", action="store_true",
                     help="AUDIT: permute labels across stocks within each date; any edge left = leak")
     a = ap.parse_args()
+    global TEST_FROM, TEST_TO
+    if a.test_from: TEST_FROM = a.test_from
+    if a.test_to: TEST_TO = a.test_to
     t0 = time.time()
     P = load_panel()
-    X, C, univ, mkt = compute_features(P, a.step)
+    fstep = 1 if a.predict_all else a.step         # feature grid; training grid stays `a.step`
+    X, C, univ, mkt = compute_features(P, fstep)
     if a.events:
-        X = X.join(pd.read_parquet(BASE/f"data_store/smart_events_s{a.step}.parquet"))
+        X = X.join(pd.read_parquet(BASE/f"data_store/smart_events_s{fstep}.parquet"))
     if a.peers:
-        X = X.join(pd.read_parquet(BASE/f"data_store/smart_peers_s{a.step}.parquet"))
+        X = X.join(pd.read_parquet(BASE/f"data_store/smart_peers_s{fstep}.parquet"))
     if a.fo:
-        X = X.join(pd.read_parquet(BASE/f"data_store/smart_fo_s{a.step}.parquet"))
+        X = X.join(pd.read_parquet(BASE/f"data_store/smart_fo_s{fstep}.parquet"))
     if a.fund:
-        X = X.join(pd.read_parquet(BASE/f"data_store/smart_fund_s{a.step}.parquet"))
+        X = X.join(pd.read_parquet(BASE/f"data_store/smart_fund_s{fstep}.parquet"))
     if a.ann:
-        X = X.join(pd.read_parquet(BASE/f"data_store/smart_ann_s{a.step}.parquet"))
+        X = X.join(pd.read_parquet(BASE/f"data_store/smart_ann_s{fstep}.parquet"))
     if a.raw_sparse:
         SPARSE_RAW.update({"prom_net", "ins_net", "ins_buyers"})
     if a.no_insider:
@@ -426,7 +446,15 @@ def main():
         rng = np.random.default_rng(0)
         y = y.groupby(level="date", group_keys=False).apply(
             lambda g: pd.Series(rng.permutation(g.values), index=g.index)).rename("fwd")
-    pred, imp = walk_forward(Xr, y, a.h, a.step, C.index, a.halflife, tuple(range(7, 7 + a.seeds)), a.lambdarank)
+    grid = set(C.index[260::a.step]) if a.predict_all else None
+    pred, imp = walk_forward(Xr, y, a.h, a.step, C.index, a.halflife, tuple(range(7, 7 + a.seeds)), a.lambdarank, a.target, grid)
+    if a.preds_only:
+        tg = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_ni" if a.no_insider else "") \
+            + (f"_x{a.seeds}" if a.seeds > 1 else "") + ("_px_d1" if a.predict_all else "_px") \
+            + (f"_tf{TEST_FROM}-{TEST_TO}" if (a.test_from or a.test_to) else "")
+        pred.to_frame().to_parquet(BASE/f"data_store/smart_ml_pred_{tg}.parquet")
+        print(f"saved daily predictions {tg}: {len(pred):,} rows, {pred.index.get_level_values('date').nunique()} dates, {time.time()-t0:.0f}s")
+        return
     print(f"model done {time.time()-t0:.0f}s\n")
     yt = y[y.index.get_level_values("date").year >= TEST_FROM]
     print(f"== IC / top-decile, OOS {TEST_FROM}+, horizon {a.h}d (walk-forward) ==")
@@ -460,7 +488,7 @@ def main():
     yr.iloc[0] = out.resample("YE").last().iloc[0]/out.iloc[0] - 1
     print("\n== by calendar year ==")
     print((yr*100).round(1).rename(index=lambda d: d.year).to_string())
-    tag = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_fo" if a.fo else "") + ("_fd" if a.fund else "") + ("_an" if a.ann else "") + ("_rs" if a.raw_sparse else "") + ("_ni" if a.no_insider else "") + ("_nm" if a.no_mkt else "") + ("_lr" if a.lambdarank else "") + "_px" + ("_shuf" if a.shuffle else "") \
+    tag = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_fo" if a.fo else "") + ("_fd" if a.fund else "") + ("_an" if a.ann else "") + ("_rs" if a.raw_sparse else "") + ("_ni" if a.no_insider else "") + ("_nm" if a.no_mkt else "") + ("_lr" if a.lambdarank else "") + ("" if a.target == "rank" else f"_t{a.target}") + "_px" + ("_shuf" if a.shuffle else "") \
         + (f"_hl{a.halflife:g}" if a.halflife else "") + (f"_x{a.seeds}" if a.seeds > 1 else "")
     out.to_parquet(BASE/f"data_store/smart_ml_nav_{tag}.parquet")
     pred.to_frame().to_parquet(BASE/f"data_store/smart_ml_pred_{tag}.parquet")
