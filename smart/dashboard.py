@@ -174,14 +174,14 @@ def page():
         warns = "".join(f"<li>{E(w)}</li>" for w in tk.get("warnings", []))
         rh = _read_json(REAL_HOLD, {})
         held = ", ".join(f"{k} {v['qty']}" for k, v in sorted(rh.items())) or "none recorded yet"
-        tk_html = (f"<div class=card><h2>Real-money order ticket</h2><p class=muted>Decision {E(tk['decided'])} · prices as of {E(tk['price_date'])} · "
-                   f"capital ₹{tk['capital']:,.0f} ({tk['names']} names, ₹{tk['slot']:,.0f} each). Manual execution — the system never places orders.</p>{g_html}"
+        tk_html = (f"<div class=card><h2>Order ticket <span class=muted style='font-weight:400'>(optional — only if you ever trade this for real; you are on PAPER)</span></h2><p class=muted>Decision {E(tk['decided'])} · prices as of {E(tk['price_date'])} · "
+                   f"capital ₹{tk['capital']:,.0f} ({tk['names']} names, ₹{tk['slot']:,.0f} each). Nothing to do while paper trading — the paper books fill themselves. Guardrails below still apply to the paper smart book.</p>{g_html}"
                    f"<table><tr><th></th><th>Stock</th><th class=num>Qty</th><th class=num>Ref price</th><th class=num>Value</th><th>Why</th></tr>{rows_t}</table>"
                    f"<p>Buys ₹{tk['buy_value']:,.0f} · sells ₹{tk['sell_value']:,.0f}</p>"
                    + (f"<ul>{warns}</ul>" if warns else "") +
                    f"<p class=muted>{E(tk['how'])}</p><p class=muted>Your recorded holdings: {E(held)}</p></div>")
     else:
-        tk_html = "<div class=card><h2>Real-money order ticket</h2><p class=muted>Appears after the next weekly decision.</p></div>"
+        tk_html = "<div class=card><h2>Order ticket <span class=muted style='font-weight:400'>(optional — paper mode)</span></h2><p class=muted>Appears after the next weekly decision.</p></div>"
     scd = _read_json(SCORECARD, {})
     if scd.get("summary"):
         ref = scd.get("ref", {})

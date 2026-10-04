@@ -1,5 +1,9 @@
 # smartpiper — real-money runbook (manual execution)
 
+> **CURRENT STATUS: PAPER TRADING ONLY (decided 2026-10-04).** Nothing below needs to be done while on paper — the three paper
+> books fill themselves each evening. This runbook is kept for the day real money is considered (suggested only after 8+ weeks
+> of paper results that track the backtest and a healthy "Edge check").
+
 The primary system is the **smart 50/50 book** (50% ML rank + 50% momentum rank, 20 stocks, equal weight, weekly).
 The system generates signals and an order ticket. **It never places orders** — you do, by hand, in your broker app.
 

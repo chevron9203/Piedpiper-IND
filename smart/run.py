@@ -297,6 +297,53 @@ def monthly(a):
     M.train(store, Y, log=log)
 
 
+# normal range of 3-week (15 trading day) returns in the 2013-2026 backtest: 10th / 25th / median / 75th / 90th percentile, % negative
+BAND_3W = {"smart": (-4.4, -0.7, 2.6, 5.8, 8.8, 0.30), "momentum": (-6.4, -1.7, 2.5, 6.7, 9.9, 0.34),
+           "ml": (-4.0, -0.8, 2.3, 5.5, 8.3, 0.30), "Nifty 500": (-3.9, -1.4, 1.0, 3.2, 5.2, 0.39)}
+
+
+def review(a):
+    """Paper-trading review: (1) is the MACHINERY working? (2) results vs Nifty 500 with the backtest's normal range as yardstick."""
+    from smart.dashboard import nifty500
+    rows, firsts = {}, []
+    for book, B in BOOKS.items():
+        if not B["nav"].exists():
+            continue
+        n = pd.read_csv(B["nav"], parse_dates=["date"]).drop_duplicates("date", keep="last").set_index("date")["nav"]
+        L = load_ledger(book)
+        fills = sum(len(h["trades"]) for h in L.get("history", [])); cost = sum(h.get("cost", 0) for h in L.get("history", []))
+        rows[book] = (n, fills, cost, L); firsts.append(n.index[0])
+    if not rows:
+        print("no paper NAV yet - the first fills happen at the first trading close after the first weekly decision"); return
+    start = min(firsts); last = max(n.index[-1] for n, *_ in rows.values())
+    hol = holidays(); cal = [d for d in pd.bdate_range(start, last) if d not in hol]
+    n500 = nifty500(start - pd.Timedelta(days=7))
+    n500 = n500[n500.index >= start]
+    print(f"PAPER-TRADING REVIEW   first NAV {start.date()}   latest {last.date()}   ({len(cal)} trading days, ~{len(cal)/5:.1f} weeks)\n")
+    print("1) MACHINERY CHECK")
+    for book, (n, fills, cost, L) in rows.items():
+        miss = [d for d in cal if d not in n.index and d >= n.index[0]]
+        print(f"   {book:<9} NAV days {len(n):>3}  missing trading days: {len(miss) or 'none'}{'  ' + str([str(d.date()) for d in miss[:5]]) if miss else ''}  | fills {fills}  costs paid Rs {cost:,.0f}  | holdings {len(L['holdings'])}  pending {'yes' if L.get('pending') else 'no'}")
+    print()
+    print("2) RESULTS SINCE START (paper, after modelled costs)")
+    b5 = (n500.iloc[-1]/n500.iloc[0] - 1)*100 if len(n500) > 1 else float("nan")
+    for book, (n, *_r) in rows.items():
+        r = (n.iloc[-1]/n.iloc[0] - 1)*100; dd = (n/n.cummax() - 1).min()*100
+        lo, q1, med, q3, hi, neg = BAND_3W[book]
+        print(f"   {book:<9} {r:+6.2f}%  (Rs {n.iloc[-1]:,.0f})  max drop {dd:5.1f}%   vs Nifty 500 {r - b5:+.2f}pp   [normal 3-week range in backtest: {lo:+.1f}% .. {hi:+.1f}%, median {med:+.1f}%]")
+    print(f"   Nifty 500 {b5:+6.2f}%")
+    sc = json.loads(SCORECARD.read_text()) if SCORECARD.exists() else {}
+    print("\n3) EDGE CHECK (do the top-ranked stocks beat the market afterwards?)")
+    for r in sorted(sc.get("summary", []), key=lambda r: (r["h"], r["score"])):
+        print(f"   {r['h']:>2}d {r['score']:<9} decisions {r['n']:>2}  top-20 excess {r['excess']*100:+6.2f}%  beat market {r['hit']:.0%}  IC {r['ic']:+.3f}")
+    if not sc.get("summary"):
+        print("   none scored yet (a decision is scored 10 trading days after it)")
+    n_dec = max((r["n"] for r in sc.get("summary", [])), default=0)
+    print(f"\nREADING THIS: {n_dec} scored decisions so far. {'TOO EARLY to judge the strategy - this checks the machinery only. ' if n_dec < 8 else ''}"
+          f"3-week results are dominated by noise (about {BAND_3W['smart'][5]:.0%} of all 3-week windows were negative in the backtest, even for the smart book). "
+          "A fair verdict needs 8-12 weekly decisions.")
+
+
 def status(a):
     for book, B in BOOKS.items():
         L = load_ledger(book); nav = nav_of(L)
@@ -311,7 +358,7 @@ def status(a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["daily", "weekly", "monthly", "status", "scorecard", "ticket", "record", "capital"])
+    ap.add_argument("cmd", choices=["daily", "weekly", "monthly", "status", "scorecard", "ticket", "record", "capital", "review"])
     ap.add_argument("args", nargs="*", help="record BUY|SELL SYM QTY PRICE | capital AMOUNT")
     ap.add_argument("--capital", type=float, default=None, help="ticket: capital to size for (default: saved capital)")
     ap.add_argument("--date", default=None, help="record: fill date")
@@ -322,6 +369,8 @@ def main():
     LOGS.mkdir(exist_ok=True); LIVE.mkdir(parents=True, exist_ok=True)
     if a.cmd == "scorecard":
         scorecard(W.build(asof=a.asof)); return
+    if a.cmd == "review":
+        review(a); return
     if a.cmd in ("ticket", "record", "capital"):
         from smart import ticket as T
         if a.cmd == "capital":
