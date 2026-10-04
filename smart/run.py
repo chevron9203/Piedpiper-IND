@@ -269,6 +269,12 @@ def weekly(a, P=None, st=None):
         log(txt.replace("\n", " | ") + f"  [{time.time()-t0:.0f}s]")
         if book == "smart":
             notify(txt)
+    try:                                              # real-money order ticket for the primary (smart) book
+        from smart import ticket as T
+        T.make_ticket(P)
+        log("order ticket written (smart/ticket.py)")
+    except Exception as e:
+        log(f"ticket failed: {e}")
 
 
 def monthly(a):
@@ -305,7 +311,10 @@ def status(a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["daily", "weekly", "monthly", "status", "scorecard"])
+    ap.add_argument("cmd", choices=["daily", "weekly", "monthly", "status", "scorecard", "ticket", "record", "capital"])
+    ap.add_argument("args", nargs="*", help="record BUY|SELL SYM QTY PRICE | capital AMOUNT")
+    ap.add_argument("--capital", type=float, default=None, help="ticket: capital to size for (default: saved capital)")
+    ap.add_argument("--date", default=None, help="record: fill date")
     ap.add_argument("--no-fetch", action="store_true")
     ap.add_argument("--asof", default=None, help="replay as of a past date (testing)")
     ap.add_argument("--force-weekly", action="store_true")
@@ -313,6 +322,14 @@ def main():
     LOGS.mkdir(exist_ok=True); LIVE.mkdir(parents=True, exist_ok=True)
     if a.cmd == "scorecard":
         scorecard(W.build(asof=a.asof)); return
+    if a.cmd in ("ticket", "record", "capital"):
+        from smart import ticket as T
+        if a.cmd == "capital":
+            T.set_capital(float(a.args[0])); print(f"real-money capital set to Rs {float(a.args[0]):,.0f}"); return
+        if a.cmd == "record":
+            H = T.record(a.args[0], a.args[1], int(a.args[2]), float(a.args[3]), a.date)
+            print(f"recorded. you now hold {len(H)} names: " + ", ".join(f"{k} {v['qty']}" for k, v in sorted(H.items()))); return
+        T.make_ticket(W.build(asof=a.asof), a.capital); print(T.TICKET_TXT.read_text()); return
     {"daily": daily, "weekly": weekly, "monthly": monthly, "status": status}[a.cmd](a)
 
 

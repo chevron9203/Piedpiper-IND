@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pandas as pd
 
 from smart.config import ALERTS, BOOKS, CAPITAL, DATA, LEDGER, LIVE, NAV, SCORECARD, SIGNAL
+from smart.ticket import REAL_HOLD, TICKET
 
 PORT = 5010          # 5001 = piedpiper dashboard, 5002 = piedpiper paper_dashboard
 E = html.escape
@@ -141,6 +142,46 @@ def page():
                      f"<p><b>Holdings</b> {chips(sorted(Lm['holdings']), '')}</p>"
                      f"<p class=muted>Latest signal {E(sigm.get('decided', '—'))}: buy {chips(sigm.get('buys', []), 'buy')} "
                      f"sell {chips(sigm.get('sells', []), 'sell')}</p></div>")
+    tk = _read_json(TICKET, {})
+    # ---- guardrails: pre-committed pause rules (see RUNBOOK.md)
+    g_state, g_msgs = "GO", []
+    def _worse(cur, new):
+        return new if ["GO", "REVIEW", "PAUSE"].index(new) > ["GO", "REVIEW", "PAUSE"].index(cur) else cur
+    if len(nav):
+        dd_now = float(nav.iloc[-1]/nav.max() - 1)
+        age = (pd.Timestamp.now().normalize() - nav.index[-1]).days
+        if age > 5:
+            g_state = _worse(g_state, "PAUSE"); g_msgs.append(f"data stale: last daily update {nav.index[-1]:%d %b} ({age} days ago) — do not trade on an old signal")
+        if dd_now <= -0.35:
+            g_state = _worse(g_state, "PAUSE"); g_msgs.append(f"smart book is {dd_now:.0%} from its peak (backtest worst −36%)")
+        elif dd_now <= -0.25:
+            g_state = _worse(g_state, "REVIEW"); g_msgs.append(f"smart book is {dd_now:.0%} from its peak")
+    else:
+        g_msgs.append("no paper NAV history yet (first fills Monday)")
+    _scd = _read_json(SCORECARD, {})
+    for r in _scd.get("summary", []):
+        if r["score"] == "blend" and r["h"] == 21 and r["n"] >= 12 and r["excess"] < 0:
+            g_state = _worse(g_state, "REVIEW"); g_msgs.append(f"edge check: top-20 21-day excess {r['excess']*100:+.2f}% over {r['n']} decisions (backtest ≈ +2.2%)")
+    g_cls = {"GO": "up", "REVIEW": "", "PAUSE": "dn"}[g_state]
+    g_html = (f"<p><b>Guardrails: <span class='{g_cls}'>{g_state}</span></b>"
+              + (" — " + "; ".join(E(m) for m in g_msgs) if g_msgs else " — all pre-committed checks pass") + "</p>")
+    if tk.get("lines") is not None:
+        def tr(r):
+            c = "up" if r["action"] == "BUY" else "dn"
+            return (f"<tr><td class={c}><b>{r['action']}</b></td><td>{E(r['sym'])}</td><td class=num>{r['qty']}</td>"
+                    f"<td class=num>₹{r['ref_price']:,.2f}</td><td class=num>₹{r['value']:,.0f}</td><td class=muted>{E(r['why'])}</td></tr>")
+        rows_t = "".join(tr(r) for r in tk["lines"]) or "<tr><td colspan=6 class=muted>Nothing to trade this week.</td></tr>"
+        warns = "".join(f"<li>{E(w)}</li>" for w in tk.get("warnings", []))
+        rh = _read_json(REAL_HOLD, {})
+        held = ", ".join(f"{k} {v['qty']}" for k, v in sorted(rh.items())) or "none recorded yet"
+        tk_html = (f"<div class=card><h2>Real-money order ticket</h2><p class=muted>Decision {E(tk['decided'])} · prices as of {E(tk['price_date'])} · "
+                   f"capital ₹{tk['capital']:,.0f} ({tk['names']} names, ₹{tk['slot']:,.0f} each). Manual execution — the system never places orders.</p>{g_html}"
+                   f"<table><tr><th></th><th>Stock</th><th class=num>Qty</th><th class=num>Ref price</th><th class=num>Value</th><th>Why</th></tr>{rows_t}</table>"
+                   f"<p>Buys ₹{tk['buy_value']:,.0f} · sells ₹{tk['sell_value']:,.0f}</p>"
+                   + (f"<ul>{warns}</ul>" if warns else "") +
+                   f"<p class=muted>{E(tk['how'])}</p><p class=muted>Your recorded holdings: {E(held)}</p></div>")
+    else:
+        tk_html = "<div class=card><h2>Real-money order ticket</h2><p class=muted>Appears after the next weekly decision.</p></div>"
     scd = _read_json(SCORECARD, {})
     if scd.get("summary"):
         ref = scd.get("ref", {})
@@ -187,6 +228,7 @@ ul{{padding-left:18px}} li{{margin-bottom:8px}} a{{color:var(--accent)}}
 <div class="big {'up' if ret >= 0 else 'dn'}">₹{total:,.0f} <span style="font-size:18px">{ret:+.2%}</span></div>
 <div class=muted>as of {last}{bline} · since {E(str(L.get('start') or 'first fill pending'))} · cash ₹{L['cash']:,.0f}</div>
 {chart(nav, bench, others=cmp_navs)}</div>
+{tk_html}
 {cmp_html}
 {scd_html}
 <div class=card><h2>Smart book holdings ({len(L['holdings'])})</h2>{pend_html}
