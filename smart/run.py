@@ -15,8 +15,8 @@ import argparse, json, os, subprocess, sys, time
 from pathlib import Path
 import numpy as np, pandas as pd
 
-from smart.config import (BASE, BOOK, BOOKS, CAPITAL, CORR_WIN, DATA, HORIZONS, LABELS, LEDGER, LIVE,
-                          LOGS, NAV, SIGNAL, STORE)
+from smart.config import (BASE, BOOK, BOOKS, CAPITAL, CORR_WIN, DATA, HIST, HORIZONS, LABELS, LEDGER, LIVE,
+                          LOGS, MOM_W, NAV, SCORECARD, SIGNAL, STORE)
 from smart import window as W
 
 sys.path.insert(0, str(BASE))
@@ -168,6 +168,53 @@ def daily(a):
             notify(f"smartpiper filled {len(trades)} paper orders at {day.date()} close. NAV Rs {nav:,.0f}")
     if is_week_end(day) or a.force_weekly:
         weekly(a, P=P, st=st)
+    try:
+        scorecard(P)
+    except Exception as e:                           # the scorecard must never break the daily job
+        log(f"scorecard failed: {e}")
+
+
+# live edge check: reference values from the backtest (DEV 2013-22, rank 1-20 by the blended score)
+SC_REF = {"excess": {10: 0.011, 21: 0.022}, "ic": {10: 0.10, 21: 0.09}}
+
+
+def scorecard(P):
+    """For every archived weekly decision whose horizon has elapsed: the top-20 stocks' realised return minus the
+    universe average, and the rank correlation (IC) of the score with the realised return. Entry = next close."""
+    files = sorted(HIST.glob("scores_*.parquet")) if HIST.exists() else []
+    if not files:
+        return None
+    C = P["close"].ffill(limit=5); idx = C.index
+    rows = []
+    for f in files:
+        d = pd.Timestamp(f.stem.split("_", 1)[1])
+        if d not in idx:
+            continue
+        i = idx.get_loc(d); H = pd.read_parquet(f)
+        for h in (10, 21):
+            if i + 1 + h > len(idx) - 1:
+                continue
+            r = (C.iloc[i + 1 + h]/C.iloc[i + 1] - 1).reindex(H.index)
+            r = r[np.isfinite(r)]
+            if len(r) < 200:
+                continue
+            mk = float(r.mean())
+            for name, sc in (("blend", (1 - MOM_W)*H["ml"] + MOM_W*H["mom"]), ("ML", H["ml"]), ("momentum", H["mom"])):
+                sc = sc.reindex(r.index)
+                rows.append(dict(date=str(d.date()), h=h, score=name, excess=float(r[sc.nlargest(20).index].mean() - mk),
+                                 ic=float(sc.corr(r, method="spearman"))))
+    if not rows:
+        SCORECARD.write_text(json.dumps({"asof": str(idx[-1].date()), "summary": [], "ref": SC_REF, "n_files": len(files)}))
+        return None
+    D = pd.DataFrame(rows)
+    S = D.groupby(["h", "score"]).agg(n=("excess", "size"), excess=("excess", "mean"),
+                                      hit=("excess", lambda x: float((x > 0).mean())), ic=("ic", "mean")).reset_index()
+    SCORECARD.write_text(json.dumps({"asof": str(idx[-1].date()), "n_files": len(files), "ref": SC_REF,
+                                     "summary": S.to_dict("records"), "rows": rows}))
+    for r in S[S["score"] == "blend"].itertuples():
+        log(f"scorecard [{r.h}d, blend]: {r.n} decisions, top-20 excess {r.excess:+.2%} (backtest {SC_REF['excess'][r.h]:+.1%}), "
+            f"hit {r.hit:.0%}, IC {r.ic:+.3f} (backtest ~{SC_REF['ic'][r.h]:+.2f})")
+    return S
 
 
 def weekly(a, P=None, st=None):
@@ -186,6 +233,8 @@ def weekly(a, P=None, st=None):
     from scripts import research_smart_ml as SM
     from smart.config import MOM_W
     ml_s, mom_s = M.score_parts(X)
+    HIST.mkdir(parents=True, exist_ok=True)           # forward-evidence archive: honest, point-in-time scores
+    pd.DataFrame({"ml": ml_s, "mom": mom_s}).astype("float32").to_parquet(HIST/f"scores_{day.date()}.parquet")
     scores = {"smart": ((1 - MOM_W)*ml_s + MOM_W*mom_s).sort_values(ascending=False),
               "momentum": mom_s.sort_values(ascending=False),
               "ml": ml_s.sort_values(ascending=False)}
@@ -206,6 +255,7 @@ def weekly(a, P=None, st=None):
                "holds": [s for s in target.index if s in w.index],
                "top30": [{"sym": s, "score": round(float(score[s]), 4)} for s in score.index[:30]]}
         B["signal"].write_text(json.dumps(sig, indent=1))
+        (HIST/f"signal_{book}_{day.date()}.json").write_text(json.dumps(sig))
         # names the band left untouched are NOT re-trimmed at the fill either (they drift
         # between decision and fill; trimming them back is exactly the churn the band removes)
         band_hold = [x for x in target.index if x in w.index and target[x] == w[x]]
@@ -255,12 +305,14 @@ def status(a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["daily", "weekly", "monthly", "status"])
+    ap.add_argument("cmd", choices=["daily", "weekly", "monthly", "status", "scorecard"])
     ap.add_argument("--no-fetch", action="store_true")
     ap.add_argument("--asof", default=None, help="replay as of a past date (testing)")
     ap.add_argument("--force-weekly", action="store_true")
     a = ap.parse_args()
     LOGS.mkdir(exist_ok=True); LIVE.mkdir(parents=True, exist_ok=True)
+    if a.cmd == "scorecard":
+        scorecard(W.build(asof=a.asof)); return
     {"daily": daily, "weekly": weekly, "monthly": monthly, "status": status}[a.cmd](a)
 
 

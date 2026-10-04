@@ -17,6 +17,8 @@ LEDGER = LIVE/"ledger.json"               # paper book: holdings, pending orders
 NAV = LIVE/"nav.csv"                      # daily paper NAV
 SIGNAL = LIVE/"signal.json"               # latest weekly decision
 ALERTS = LIVE/"alerts.jsonl"              # watcher output
+HIST = LIVE/"history"                     # every weekly decision: full ML+momentum scores of all 800 names + book signals
+SCORECARD = LIVE/"scorecard.json"         # live edge check: what the ranked stocks actually did afterwards
 # paper books run side by side on the same data/rules/costs; only the stock score differs
 BOOKS = {
     "smart":    {"ledger": LEDGER, "nav": NAV, "signal": SIGNAL, "txt": LIVE/"signal.txt",

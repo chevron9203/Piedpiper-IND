@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pandas as pd
 
-from smart.config import ALERTS, BOOKS, CAPITAL, DATA, LEDGER, LIVE, NAV, SIGNAL
+from smart.config import ALERTS, BOOKS, CAPITAL, DATA, LEDGER, LIVE, NAV, SCORECARD, SIGNAL
 
 PORT = 5010          # 5001 = piedpiper dashboard, 5002 = piedpiper paper_dashboard
 E = html.escape
@@ -141,6 +141,23 @@ def page():
                      f"<p><b>Holdings</b> {chips(sorted(Lm['holdings']), '')}</p>"
                      f"<p class=muted>Latest signal {E(sigm.get('decided', '—'))}: buy {chips(sigm.get('buys', []), 'buy')} "
                      f"sell {chips(sigm.get('sells', []), 'sell')}</p></div>")
+    scd = _read_json(SCORECARD, {})
+    if scd.get("summary"):
+        ref = scd.get("ref", {})
+        trs = ""
+        for r in sorted(scd["summary"], key=lambda r: (r["h"], ["blend", "ML", "momentum"].index(r["score"]))):
+            cls = "up" if r["excess"] > 0 else "dn"
+            trs += (f"<tr><td>{r['h']}d</td><td>{E(r['score'])}</td><td class=num>{r['n']}</td>"
+                    f"<td class='num {cls}'>{r['excess']*100:+.2f}%</td><td class=num>{r['hit']:.0%}</td><td class=num>{r['ic']:+.3f}</td></tr>")
+        scd_html = (f"<div class=card><h2>Edge check (live)</h2><p class=muted>Do the stocks we RANK highest actually beat the market afterwards? "
+                    f"Each weekly decision is scored once its horizon has passed (entry at the next close). Backtest reference: top-20 "
+                    f"+{ref.get('excess', {}).get('10', 0.011)*100:.1f}% (10d) / +{ref.get('excess', {}).get('21', 0.022)*100:.1f}% (21d) over the universe, "
+                    f"rank-IC about +0.08 to +0.10. Needs 8+ decisions before it means anything.</p>"
+                    f"<table><tr><th>Horizon</th><th>Score</th><th class=num>Decisions</th><th class=num>Top-20 excess</th>"
+                    f"<th class=num>Beat market</th><th class=num>Rank-IC</th></tr>{trs}</table></div>")
+    else:
+        scd_html = ("<div class=card><h2>Edge check (live)</h2><p class=muted>Collecting: each weekly decision is archived and scored once "
+                    "10 trading days have passed. First results appear in about two weeks.</p></div>")
     last = f"{nav.index[-1]:%d %b %Y}" if len(nav) else "—"
     bline = f" · Nifty 500 {bret:+.2%}" if bret is not None else ""
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
@@ -171,6 +188,7 @@ ul{{padding-left:18px}} li{{margin-bottom:8px}} a{{color:var(--accent)}}
 <div class=muted>as of {last}{bline} · since {E(str(L.get('start') or 'first fill pending'))} · cash ₹{L['cash']:,.0f}</div>
 {chart(nav, bench, others=cmp_navs)}</div>
 {cmp_html}
+{scd_html}
 <div class=card><h2>Smart book holdings ({len(L['holdings'])})</h2>{pend_html}
 <table><tr><th>Stock</th><th class=num>Value</th><th class=num>P&amp;L</th><th>Since</th></tr>{hold}</table></div>
 <div class=card><h2>Latest weekly signal</h2>{sig_html}</div>

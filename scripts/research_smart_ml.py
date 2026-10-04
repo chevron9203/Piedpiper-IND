@@ -407,6 +407,8 @@ def main():
     ap.add_argument("--seeds", type=int, default=1, help="average this many LightGBM seeds")
     ap.add_argument("--no-mkt", action="store_true", help="drop market-state features (m_*)")
     ap.add_argument("--target", default="rank", choices=["rank", "topq", "winsor"], help="training target")
+    ap.add_argument("--liq-max", type=int, default=None,
+                    help="SPECIALIST universe: keep only the N most liquid stocks per date (ranks/targets are then within that set)")
     ap.add_argument("--predict-all", action="store_true",
                     help="features for EVERY trading day (step 1); train on the every-5th-day grid, predict all days")
     ap.add_argument("--preds-only", action="store_true", help="stop after saving predictions")
@@ -439,6 +441,10 @@ def main():
         X = X.drop(columns=[c for c in ("prom_net", "ins_net", "ins_buyers") if c in X.columns])
     if a.no_mkt:
         X = X.drop(columns=[c for c in X.columns if c.startswith("m_")])
+    if a.liq_max:
+        _liq = X["log_turn60"].groupby(level="date").rank(ascending=False)
+        X = X[_liq <= a.liq_max]
+        print(f"specialist universe: top {a.liq_max} by liquidity, {len(X):,} rows, {len(X)//X.index.get_level_values('date').nunique()} per date")
     print(f"features {X.shape} in {time.time()-t0:.0f}s")
     Xr = rank_features(X)
     y = forward_returns(C, Xr.index.get_level_values("date").unique(), a.h)
@@ -449,7 +455,7 @@ def main():
     grid = set(C.index[260::a.step]) if a.predict_all else None
     pred, imp = walk_forward(Xr, y, a.h, a.step, C.index, a.halflife, tuple(range(7, 7 + a.seeds)), a.lambdarank, a.target, grid)
     if a.preds_only:
-        tg = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_ni" if a.no_insider else "") \
+        tg = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_ni" if a.no_insider else "") + (f"_L{a.liq_max}" if a.liq_max else "") \
             + (f"_x{a.seeds}" if a.seeds > 1 else "") + ("_px_d1" if a.predict_all else "_px") \
             + (f"_tf{TEST_FROM}-{TEST_TO}" if (a.test_from or a.test_to) else "")
         pred.to_frame().to_parquet(BASE/f"data_store/smart_ml_pred_{tg}.parquet")
