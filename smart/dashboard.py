@@ -67,10 +67,10 @@ def chart(nav, bench, w=760, h=220, pad=34, others=None):
     g.append(f'<text x="{w-pad}" y="{h-8}" class="ax" text-anchor="end">{s.index[-1]:%d %b %Y}</text>')
     if b is not None:
         g.append(f'<path d="{path(b)}" class="bench"/>')
-    for v in others.values():
-        g.append(f'<path d="{path(v)}" class="nav2"/>')
+    for n_, v in enumerate(others.values()):
+        g.append(f'<path d="{path(v)}" class="{"nav2" if n_ == 0 else "nav3"}"/>')
     g.append(f'<path d="{path(s)}" class="nav"/>')
-    leg = "".join(f'&nbsp; <span class="k nav2"></span>{E(k)}' for k in others)
+    leg = "".join(f'&nbsp; <span class="k {"nav2" if n_ == 0 else "nav3"}"></span>{E(k)}' for n_, k in enumerate(others))
     return (f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="Paper NAV vs Nifty 500">{"".join(g)}</svg>'
             f'<div class=legend><span class="k nav"></span>smart paper {leg} &nbsp; '
             f'<span class="k bench"></span>Nifty 500</div>')
@@ -123,26 +123,31 @@ def page():
                           f"<b>{E(a.get('sym', ''))}</b> <span class=muted>{E(str(a.get('ts', ''))[:16])}</span><br>"
                           f"{E(a.get('llm_summary') or a.get('desc') or '')}{link}</li>")
     al = "".join(alerts) or "<li class=muted>No alerts yet — the watcher runs 09:00–17:30 on trading days.</li>"
-    MB = BOOKS["momentum"]
-    Lm = _read_json(MB["ledger"], {"cash": CAPITAL, "holdings": {}, "pending": None})
-    navm = pd.read_csv(MB["nav"], parse_dates=["date"]).drop_duplicates("date", keep="last").set_index("date")["nav"] \
-        if MB["nav"].exists() else pd.Series(dtype=float)
-    totm = Lm["cash"] + sum(h["value"] for h in Lm["holdings"].values())
-    sigm = _read_json(MB["signal"], {})
-    mom_html = (f"<div class=muted>Same data, rules and costs — only the stock score differs (pure momentum). "
-                f"Here to show, live, which approach earns more in today's market.</div>"
-                f"<div class='big {'up' if totm >= CAPITAL else 'dn'}' style='font-size:22px'>₹{totm:,.0f} "
-                f"<span style='font-size:15px'>{totm/CAPITAL - 1:+.2%}</span></div>"
-                f"<p><b>Holdings</b> {chips(sorted(Lm['holdings']), '')}</p>"
-                f"<p class=muted>Latest signal {E(sigm.get('decided', '—'))}: buy {chips(sigm.get('buys', []), 'buy')} "
-                f"sell {chips(sigm.get('sells', []), 'sell')}</p>")
+    cmp_navs, cmp_html = {}, ""
+    notes = {"momentum": "pure momentum score", "ml": "ML picks only, no momentum"}
+    for key, title in (("momentum", "momentum only"), ("ml", "ML picks only")):
+        MB = BOOKS[key]
+        Lm = _read_json(MB["ledger"], {"cash": CAPITAL, "holdings": {}, "pending": None})
+        navm = pd.read_csv(MB["nav"], parse_dates=["date"]).drop_duplicates("date", keep="last").set_index("date")["nav"] \
+            if MB["nav"].exists() else pd.Series(dtype=float)
+        cmp_navs[f"{key} book"] = navm
+        totm = Lm["cash"] + sum(h["value"] for h in Lm["holdings"].values())
+        sigm = _read_json(MB["signal"], {})
+        cmp_html += (f"<div class=card><h2>Comparison book: {title}</h2>"
+                     f"<div class=muted>Same data, rules and costs — only the stock score differs ({notes[key]}). "
+                     f"Here to show, live, which approach earns more in today's market.</div>"
+                     f"<div class='big {'up' if totm >= CAPITAL else 'dn'}' style='font-size:22px'>₹{totm:,.0f} "
+                     f"<span style='font-size:15px'>{totm/CAPITAL - 1:+.2%}</span></div>"
+                     f"<p><b>Holdings</b> {chips(sorted(Lm['holdings']), '')}</p>"
+                     f"<p class=muted>Latest signal {E(sigm.get('decided', '—'))}: buy {chips(sigm.get('buys', []), 'buy')} "
+                     f"sell {chips(sigm.get('sells', []), 'sell')}</p></div>")
     last = f"{nav.index[-1]:%d %b %Y}" if len(nav) else "—"
     bline = f" · Nifty 500 {bret:+.2%}" if bret is not None else ""
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>smartpiper</title>
 <style>
-:root{{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e4e3de;--accent:#2f6fde;--accent2:#d9822b;--bench:#9a9a92;--up:#127a46;--dn:#b3261e}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#151514;--card:#1f1f1d;--ink:#ecebe6;--muted:#9b9a93;--line:#33322f;--accent:#7aa7ff;--accent2:#f0a35e;--bench:#77766f;--up:#5cc58d;--dn:#ff8a80}}}}
+:root{{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e4e3de;--accent:#2f6fde;--accent2:#d9822b;--accent3:#8e5bd6;--bench:#9a9a92;--up:#127a46;--dn:#b3261e}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#151514;--card:#1f1f1d;--ink:#ecebe6;--muted:#9b9a93;--line:#33322f;--accent:#7aa7ff;--accent2:#f0a35e;--accent3:#c3a1ff;--bench:#77766f;--up:#5cc58d;--dn:#ff8a80}}}}
 body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}}
 main{{max-width:900px;margin:0 auto;padding:20px 16px 48px}}
 h1{{font-size:20px;margin:0}} h2{{font-size:15px;margin:0 0 10px}}
@@ -154,8 +159,8 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px 4px;border-botto
 svg{{width:100%;height:auto}} .nav{{fill:none;stroke:var(--accent);stroke-width:2.2}} .bench{{fill:none;stroke:var(--bench);stroke-width:1.6;stroke-dasharray:4 3}}
 .zero{{stroke:var(--line)}} .ax{{fill:var(--muted);font-size:11px}}
 .legend{{font-size:13px;color:var(--muted)}} .k{{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:4px}}
-.k.nav{{background:var(--accent)}} .k.bench{{background:var(--bench)}} .k.nav2{{background:var(--accent2)}}
-.nav2{{fill:none;stroke:var(--accent2);stroke-width:1.8}}
+.k.nav{{background:var(--accent)}} .k.bench{{background:var(--bench)}} .k.nav2{{background:var(--accent2)}} .k.nav3{{background:var(--accent3)}}
+.nav2{{fill:none;stroke:var(--accent2);stroke-width:1.8}} .nav3{{fill:none;stroke:var(--accent3);stroke-width:1.8}}
 .chip{{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin:2px;font-size:13px}}
 .chip.buy{{border-color:var(--up);color:var(--up)}} .chip.sell{{border-color:var(--dn);color:var(--dn)}}
 ul{{padding-left:18px}} li{{margin-bottom:8px}} a{{color:var(--accent)}}
@@ -164,8 +169,8 @@ ul{{padding-left:18px}} li{{margin-bottom:8px}} a{{color:var(--accent)}}
 <div class=card><div class=muted>Paper NAV (₹{CAPITAL:,.0f} start)</div>
 <div class="big {'up' if ret >= 0 else 'dn'}">₹{total:,.0f} <span style="font-size:18px">{ret:+.2%}</span></div>
 <div class=muted>as of {last}{bline} · since {E(str(L.get('start') or 'first fill pending'))} · cash ₹{L['cash']:,.0f}</div>
-{chart(nav, bench, others={"momentum book": navm})}</div>
-<div class=card><h2>Comparison book: momentum only</h2>{mom_html}</div>
+{chart(nav, bench, others=cmp_navs)}</div>
+{cmp_html}
 <div class=card><h2>Smart book holdings ({len(L['holdings'])})</h2>{pend_html}
 <table><tr><th>Stock</th><th class=num>Value</th><th class=num>P&amp;L</th><th>Since</th></tr>{hold}</table></div>
 <div class=card><h2>Latest weekly signal</h2>{sig_html}</div>

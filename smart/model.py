@@ -52,9 +52,9 @@ def train(store=None, labels=None, horizons=HORIZONS, seeds=SEEDS, log=print):
     return meta
 
 
-def score(X_today):
-    """Blend score for one decision date: 75% mean ML rank (3 horizons x 3 seeds) + 25%
-    risk-adjusted momentum rank. X_today: unranked rows for a single date."""
+def score_parts(X_today):
+    """(ml, momentum) percentile scores for one decision date, each a Series indexed by symbol:
+    ml = mean rank of the 3 horizons x 3 seeds; momentum = risk-adjusted multi-timeframe momentum rank."""
     import lightgbm as lgb
     meta = json.loads((MODELS/"meta.json").read_text())
     Xr = SM.rank_features(X_today)[meta["features"]]
@@ -64,4 +64,10 @@ def score(X_today):
         comp.append(pd.Series(p, index=Xr.index).rank(pct=True))
     ml = sum(comp)/len(comp)
     mom = Xr["mom_riskadj"].rank(pct=True)
-    return ((1 - MOM_W)*ml + MOM_W*mom).droplevel("date").sort_values(ascending=False)
+    return ml.droplevel("date"), mom.droplevel("date")
+
+
+def score(X_today):
+    """Blend score for one decision date: (1-MOM_W) x ML rank + MOM_W x momentum rank."""
+    ml, mom = score_parts(X_today)
+    return ((1 - MOM_W)*ml + MOM_W*mom).sort_values(ascending=False)

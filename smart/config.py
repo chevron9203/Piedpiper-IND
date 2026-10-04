@@ -24,6 +24,9 @@ BOOKS = {
     "momentum": {"ledger": LIVE/"ledger_momentum.json", "nav": LIVE/"nav_momentum.csv",
                  "signal": LIVE/"signal_momentum.json", "txt": LIVE/"signal_momentum.txt",
                  "label": "momentum only (comparison)"},
+    "ml":       {"ledger": LIVE/"ledger_ml.json", "nav": LIVE/"nav_ml.csv",
+                 "signal": LIVE/"signal_ml.json", "txt": LIVE/"signal_ml.txt",
+                 "label": "ML picks only, no momentum (comparison)"},
 }
 
 VERSION = "v1.1"     # v1.1: traded-price (not split-adjusted) for price floor + log_price; no insider features

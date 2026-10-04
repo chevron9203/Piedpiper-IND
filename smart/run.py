@@ -184,9 +184,11 @@ def weekly(a, P=None, st=None):
         store.to_parquet(STORE)
     del store
     from scripts import research_smart_ml as SM
-    scores = {"smart": M.score(X),
-              "momentum": SM.rank_features(X)["mom_riskadj"].rank(pct=True).droplevel("date")
-                          .sort_values(ascending=False)}
+    from smart.config import MOM_W
+    ml_s, mom_s = M.score_parts(X)
+    scores = {"smart": ((1 - MOM_W)*ml_s + MOM_W*mom_s).sort_values(ascending=False),
+              "momentum": mom_s.sort_values(ascending=False),
+              "ml": ml_s.sort_values(ascending=False)}
     Rres = C.pct_change(fill_method=None).sub(mkt, axis=0).iloc[-CORR_WIN:]
     for book, B in BOOKS.items():
         score = scores[book]

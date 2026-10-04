@@ -98,7 +98,7 @@ def decide2(s, w, Rres_win, top_n, exit_rank, band, max_corr, can_buy, must_sell
 # ------------------------------------------------------------------ the simulator
 def simulate_rules(score, C, mkt, cost, top_n=20, exit_rank=100, band=0.25, max_corr=0.5,
                    corr_win=126, every=1, offset=0, rules=None, cooldown=21, cash_r=0.0, gate_mask=None,
-                   gate_hold=False, min_slots=1, depth=6, want_trips=False, end_date=None, winners=None, addon=None, hold_log=None):
+                   gate_hold=False, min_slots=1, depth=6, want_trips=False, end_date=None, winners=None, addon=None, hold_log=None, expo=None):
     """rules (all optional, all evaluated on the CLOSE; a flag sells at the NEXT close):
          stop=0.10        close <= entry*(1-stop)
          trail=0.20       close <= peak-since-entry*(1-trail)
@@ -132,7 +132,8 @@ def simulate_rules(score, C, mkt, cost, top_n=20, exit_rank=100, band=0.25, max_
     by_date = {d: g.droplevel(0).sort_values(ascending=False) for d, g in score.groupby(level="date")}
     nav = [1.0]; navd = [idx[idx.get_loc(sdates[0]) + 1]]
     w = pd.Series(dtype=float); turnover = 0.0
-    pos, pending, cool, trips, expo = {}, {}, {}, [], []
+    m_prev = 1.0; switches = 0
+    pos, pending, cool, trips, expo_hist = {}, {}, {}, [], []
 
     def open_trip(x, i):
         p = Pv[i, colpos[x]]
@@ -163,9 +164,20 @@ def simulate_rules(score, C, mkt, cost, top_n=20, exit_rank=100, band=0.25, max_
                     rt = p/st["entry_px"] - 1
                     if (addon["when"] == "under" and rt <= -addon["dd"]) or (addon["when"] == "over" and rt >= addon["dd"]):
                         boost.add(x)
-        target = decide2(by_date[d], w, Rres.iloc[max(0, i_d - corr_win + 1): i_d + 1], top_n, exit_rank,
+        m_new = 1.0
+        w_in = w
+        if expo is not None:           # market-level EXPOSURE overlay: scale every position, the rest earns cash_r
+            raw = float(expo(i_d, nav) if callable(expo) else expo.iloc[i_d])
+            m_new = raw
+            if abs(m_new - m_prev) > 1e-9: switches += 1
+            m_prev = m_new
+            sw = float(w.sum())
+            w_in = w/sw if sw > 1e-9 else w          # decide on RELATIVE weights so the band logic is unaffected
+        target = decide2(by_date[d], w_in, Rres.iloc[max(0, i_d - corr_win + 1): i_d + 1], top_n, exit_rank,
                          band, max_corr, can_buy, must_sell, min_slots, depth, winners, boost,
                          addon["mult"] if addon else 1.0, addon["rank"] if addon else 20)
+        if expo is not None:
+            target = target*m_new
         dwi = target.sub(w, fill_value=0).abs()
         ci = cost.iloc[i0].reindex(dwi.index).fillna(0.01)
         c = (dwi*ci).sum()
@@ -189,7 +201,7 @@ def simulate_rules(score, C, mkt, cost, top_n=20, exit_rank=100, band=0.25, max_
             for x in died:
                 r[x] = -SM.DEAD_HAIRCUT
             cashw = max(1.0 - float(w.sum()), 0.0)
-            expo.append(float(w.sum()))
+            expo_hist.append(float(w.sum()))
             pr = float((w*r).sum()) + cashw*cash_d[i]
             if hold_log is not None:                       # (day index, symbol, weight, return, NAV before the day)
                 for x in w.index:
@@ -244,7 +256,7 @@ def simulate_rules(score, C, mkt, cost, top_n=20, exit_rank=100, band=0.25, max_
             nav.append(v); navd.append(idx[i])
     nav = pd.Series(nav, index=navd)
     yrs = (nav.index[-1] - nav.index[0]).days/365.25
-    out = dict(nav=nav, turnover=turnover/yrs, exposure=float(np.mean(expo)) if expo else 1.0)
+    out = dict(nav=nav, turnover=turnover/yrs, exposure=float(np.mean(expo_hist)) if expo_hist else 1.0, switches=switches)
     if want_trips:
         out["trips"] = pd.DataFrame(trips)
         out["idx"] = idx
@@ -687,6 +699,180 @@ def cmd_split(a):
     pickle.dump(dict(nav=nav, R=R), open(BASE/"data_store/smart_split_results.pkl", "wb"))
 
 
+SIGF = BASE/"data_store/smart_overlay_signals.pkl"
+CASH = 0.065            # liquid-fund yield assumed for uninvested money (approximation: 3.5-8% over the years)
+
+
+def make_expo(spec, SG):
+    """Exposure rule -> Series (known at each close) or callable(i, nav_list). Levels are 0 / .25 / .5 / .75 / 1."""
+    if spec is None:
+        return None
+    kind = spec[0]
+    if kind == "breadth":                       # market breadth: share of the universe above its 200DMA
+        v = pd.Series(1.0, index=SG.index)
+        for thr, lvl in sorted(spec[1], reverse=True):      # e.g. [(0.35, .5), (0.25, 0.)]: deepest threshold wins
+            v[SG["breadth"] < thr] = lvl
+        return v
+    if kind == "mkt":                           # equal-weight market vs its own moving average
+        ma, lvl = spec[1], spec[2]
+        v = pd.Series(1.0, index=SG.index); v[SG[f"below{ma}"]] = lvl
+        if len(spec) > 3:                       # deeper step: below MA AND 63d return negative
+            v[SG[f"below{ma}"] & (SG["r63"] < 0)] = spec[3]
+        return v
+    if kind == "sig_lt":                        # any precomputed signal column: below thr -> level (deepest wins)
+        v = pd.Series(1.0, index=SG.index)
+        for thr, lvl in sorted(spec[2], reverse=True):
+            v[SG[spec[1]] < thr] = lvl
+        return v
+    if kind == "combo":                         # minimum of several rules (Series and/or callables)
+        parts = [make_expo(x, SG) for x in spec[1:]]
+        def f(i, nav):
+            return min(float(p_(i, nav)) if callable(p_) else float(p_.iloc[i]) for p_ in parts)
+        return f
+    if kind == "voltarget":                     # scale to a target volatility of the BOOK itself (trailing 63d)
+        tgt = spec[1]
+        def f(i, nav):
+            if len(nav) < 70: return 1.0
+            r = np.diff(np.log(np.array(nav[-64:], dtype=float)))
+            vol = r.std()*np.sqrt(252)
+            return float(np.clip(np.floor(tgt/max(vol, 1e-6)*4)/4, 0.0, 1.0))
+        return f
+    if kind == "dd":                            # equity-curve filter: drawdown of the book from its peak
+        steps = sorted(spec[1], reverse=True)
+        def f(i, nav):
+            a = np.array(nav, dtype=float); dd = a[-1]/a.max() - 1; lvl = 1.0
+            for thr, l in steps:
+                if dd <= -thr: lvl = l
+            return lvl
+        return f
+    if kind == "navsma":                        # book NAV below its own n-day average
+        n, lvl = spec[1], spec[2]
+        def f(i, nav):
+            if len(nav) < n: return 1.0
+            a = np.array(nav[-n:], dtype=float); return lvl if a[-1] < a.mean() else 1.0
+        return f
+    raise ValueError(kind)
+
+
+def ov_cfg(cfg):
+    G = inputs()
+    if "c" not in _CP:
+        _CP["c"] = pickle.load(open(COMP, "rb")); _CP["sig"] = pickle.load(open(SIGF, "rb"))
+    ml, mom, SG = _CP["c"]["ml"], _CP["c"]["mom"], _CP["sig"]
+    a0, a1 = pd.Timestamp(cfg["start"]), pd.Timestamp(cfg["end"])
+    d = ml.index.get_level_values("date"); keep = (d >= a0) & (d <= a1)
+    mlk = ml[keep]; momk = mom.reindex(mlk.index)
+    if cfg.get("wreg"):                          # momentum weight depends on the market state
+        flag, w_bad, w_good = cfg["wreg"]
+        wv = np.where(SG[flag].reindex(d[keep]).fillna(False).values, w_bad, w_good)
+    else:
+        wv = cfg["w"]
+    sc = ((1 - wv)*mlk + wv*momk).dropna()
+    out = simulate_rules(sc, G["C"], G["mkt"], G["cm"], end_date=a1, expo=make_expo(cfg.get("expo"), SG), cash_r=CASH,
+                         **dict(FINAL, every=5, offset=cfg["off"]))
+    return dict(label=cfg["label"], win=cfg["win"], off=cfg["off"], nav=out["nav"][:a1].astype("float32"),
+                expo=out["exposure"], sw=out["switches"], to=out["turnover"])
+
+
+def cmd_overlay(a):
+    C, mkt = inputs()["C"], inputs()["mkt"]
+    idx = C.index; mc = (1 + mkt.fillna(0)).cumprod()
+    SG = pd.DataFrame(index=idx)
+    SG["below200"] = (mc < mc.rolling(200).mean()).fillna(False)
+    SG["below100"] = (mc < mc.rolling(100).mean()).fillna(False)
+    SG["r63"] = (mc/mc.shift(63) - 1).fillna(0)
+    f1 = pd.read_parquet(BASE/"data_store/smart_features_s1.parquet", columns=["m_breadth"]).groupby(level="date").first()["m_breadth"]
+    SG["breadth"] = f1.reindex(idx).ffill().fillna(0.5)
+    SG["b35"] = SG["breadth"] < 0.35
+    for t_ in (25, 30, 40, 45, 50):
+        SG[f"b{t_}"] = SG["breadth"] < t_/100
+    if SIGF.exists():                          # pick-quality signals (cand_strong, picks_trail) were added by hand to this file
+        old = pickle.load(open(SIGF, "rb"))
+        for c in ("cand_strong", "picks_trail"):
+            if c in old.columns: SG[c] = old[c]
+    pickle.dump(SG, open(SIGF, "wb"))
+    pct = lambda x: x.groupby(level="date").rank(pct=True)
+    if not COMP.exists():
+        raise SystemExit("run `split` first (builds the score components)")
+    grid = [("BASELINE (live): always 100% invested", None, None, 0.5),
+            ("breadth<35% -> 50%", ("breadth", [(0.35, 0.5)]), None, 0.5),
+            ("breadth<30% -> 0% (cash)", ("breadth", [(0.30, 0.0)]), None, 0.5),
+            ("breadth<35% -> 50%, <25% -> 0%", ("breadth", [(0.35, 0.5), (0.25, 0.0)]), None, 0.5),
+            ("breadth<40% -> 50%", ("breadth", [(0.40, 0.5)]), None, 0.5),
+            ("market<200DMA -> 50%", ("mkt", 200, 0.5), None, 0.5),
+            ("market<200DMA -> 0% (cash)", ("mkt", 200, 0.0), None, 0.5),
+            ("market<100DMA -> 50%", ("mkt", 100, 0.5), None, 0.5),
+            ("market<200DMA 50%; +63d<0 -> 0%", ("mkt", 200, 0.5, 0.0), None, 0.5),
+            ("book vol-target 20%", ("voltarget", 0.20), None, 0.5),
+            ("book vol-target 25%", ("voltarget", 0.25), None, 0.5),
+            ("book vol-target 30%", ("voltarget", 0.30), None, 0.5),
+            ("book drawdown>12% -> 50%", ("dd", [(0.12, 0.5)]), None, 0.5),
+            ("book DD>12% 50%, >20% 0%", ("dd", [(0.12, 0.5), (0.20, 0.0)]), None, 0.5),
+            ("book below 60d avg -> 50%", ("navsma", 60, 0.5), None, 0.5),
+            ("combo: mkt<200DMA 50% + breadth<25% 0%", ("combo", ("mkt", 200, 0.5), ("breadth", [(0.25, 0.0)])), None, 0.5),
+            ("combo: breadth<35% 50% + book DD>20% 0%", ("combo", ("breadth", [(0.35, 0.5)]), ("dd", [(0.20, 0.0)])), None, 0.5),
+            ("PICKS WORKING? trailing top-20 excess < 0.4% -> 50%", ("sig_lt", "picks_trail", [(0.004, 0.5)]), None, 0.5),
+            ("PICKS WORKING? <0% -> 50%, < -1% -> 0%", ("sig_lt", "picks_trail", [(0.0, 0.5), (-0.01, 0.0)]), None, 0.5),
+            ("PICKS WORKING? < -0.5% -> 0% (cash)", ("sig_lt", "picks_trail", [(-0.005, 0.0)]), None, 0.5),
+            ("CANDIDATES STRONG? <50% of top-30 in uptrend -> 50%", ("sig_lt", "cand_strong", [(0.50, 0.5)]), None, 0.5),
+            ("CANDIDATES STRONG? <50% -> 50%, <30% -> 0%", ("sig_lt", "cand_strong", [(0.50, 0.5), (0.30, 0.0)]), None, 0.5),
+            ("CANDIDATES STRONG? <30% -> 0% (cash)", ("sig_lt", "cand_strong", [(0.30, 0.0)]), None, 0.5),
+            ("combo: picks<0% OR candidates<50% -> 50%", ("combo", ("sig_lt", "picks_trail", [(0.0, 0.5)]), ("sig_lt", "cand_strong", [(0.50, 0.5)])), None, 0.5),
+            ("combo: picks<-0.5% AND cand<50% -> 0%, either -> 50%", ("combo", ("sig_lt", "picks_trail", [(0.0, 0.5)]), ("sig_lt", "cand_strong", [(0.50, 0.5)]), ("sig_lt", "picks_trail", [(-0.005, 0.5)])), None, 0.5),
+            ("NO CASH: momentum weight 25% when market<200DMA", None, ("below200", 0.25, 0.5), 0.5),
+            ("NO CASH: ML-only when market<200DMA", None, ("below200", 0.0, 0.5), 0.5),
+            ("NO CASH: ML-only when breadth<35%", None, ("b35", 0.0, 0.5), 0.5)]
+    if a.which == "regime":                 # recipe switching by market state (no cash): robustness of the winning family
+        grid = [grid[0], ("momentum weight 75% always", None, None, 0.75)]
+        for t_ in (25, 30, 35, 40, 45, 50):
+            for wb in (0.0, 0.25):
+                for wg in (0.5, 0.75):
+                    grid.append((f"breadth<{t_}%: momentum {wb:.0%} (else {wg:.0%})", None, (f"b{t_}", wb, wg), 0.5))
+    cfgs = [dict(label=l, expo=e, wreg=wr, w=w, win=wn, start=st, end=en, off=o)
+            for l, e, wr, w in grid for wn, (st, en) in WIN.items() for o in range(5)]
+    t0 = time.time()
+    with ProcessPoolExecutor(a.workers, mp_context=mp.get_context("spawn")) as ex:
+        res = list(ex.map(ov_cfg, cfgs))
+    print(f"({len(res)} runs in {time.time() - t0:.0f}s)   cash earns {CASH:.1%}; overlay decided at weekly closes, executed next close with costs\n")
+    rows = []
+    for r in res:
+        st = nstats(r["nav"]); n = r["nav"]
+        yrs = {}
+        for y in (2018, 2020, 2022, 2025, 2026):
+            if n.index[0] <= pd.Timestamp(f"{y}-01-05") and n.index[-1] >= pd.Timestamp(f"{y}-12-20" if y < 2026 else "2026-09-25"):
+                a0_ = n.loc[:f"{y-1}-12-31"]; a0_ = a0_.iloc[-1] if len(a0_) else n.iloc[0]
+                yrs[y] = float(n.loc[:f"{y}-12-31"].iloc[-1]/a0_ - 1)*100
+        rows.append(dict(label=r["label"], win=r["win"], expo=r["expo"], sw=r["sw"], **st, **{f"y{k}": v for k, v in yrs.items()}))
+    R = pd.DataFrame(rows)
+    M = R.groupby(["label", "win"]).mean(numeric_only=True)
+    order = [g[0] for g in grid]
+    print(f"{'':<50}{'A 2013-2020: CAGR / DD / Sh':^30}{'invested':>9}   {'B 2021-Oct26: CAGR / DD / Sh':^30}{'invested':>9}   2018 | 2020 | 2022 | 2025 | 2026*")
+    for l in order:
+        A_, B_ = M.loc[(l, "A 2013-2020")], M.loc[(l, "B 2021-2026")]
+        ys = " ".join(f"{(A_.get('y2018') if y == 2018 else A_.get('y2020') if y == 2020 else B_.get(f'y{y}')):>+5.0f}" for y in (2018, 2020, 2022, 2025, 2026))
+        print(f"  {l:<48}{A_['cagr']*100:>+8.1f}% {A_['dd']*100:>7.1f}% {A_['sh']:>5.2f}   {A_['expo']:>6.0%}   {B_['cagr']*100:>+8.1f}% {B_['dd']*100:>7.1f}% {B_['sh']:>5.2f}   {B_['expo']:>6.0%}   {ys}")
+    # the user's criterion: what does each rule COST in strong years and what does it SAVE in weak years?
+    def yearly(n):
+        out = {}
+        for y in range(2013, 2027):
+            if n.index[0] <= pd.Timestamp(f"{y}-01-05") and n.index[-1] >= pd.Timestamp(f"{y}-12-20" if y < 2026 else "2026-09-25"):
+                a0_ = n.loc[:f"{y-1}-12-31"]; a0_ = a0_.iloc[-1] if len(a0_) else n.iloc[0]
+                out[y] = float(n.loc[:f"{y}-12-31"].iloc[-1]/a0_ - 1)*100
+        return out
+    Yr = {}
+    for lab, win, off, nv in [(r["label"], r["win"], r["off"], r["nav"]) for r in res]:
+        Yr.setdefault(lab, {}).setdefault(off, {}).update(yearly(nv))
+    Ym = {lab: pd.DataFrame(v).mean(axis=1) for lab, v in Yr.items()}
+    base = Ym[grid[0][0]]
+    strong = base[base >= 40].index; weak = base[base < 15].index
+    print(f"\nWHAT EACH RULE COSTS IN STRONG YEARS vs SAVES IN WEAK YEARS  (strong = baseline >= +40%: {list(strong)};  weak = baseline < +15%: {list(weak)})")
+    print(f"  {'':<56}{'strong yrs: mean change':>24}{'weak yrs: mean change':>24}   net over all 14 yrs")
+    for lab in order[1:]:
+        d = Ym[lab] - base
+        print(f"  {lab:<56}{d[strong].mean():>+22.1f}pp{d[weak].mean():>+22.1f}pp   {d.mean():>+6.1f}pp/yr")
+    pickle.dump(dict(R=R, Ym=Ym, res=[(r["label"], r["win"], r["off"], r["nav"]) for r in res]), open(BASE/"data_store/smart_overlay_results.pkl", "wb"))
+
+
 def cmd_gates(a):
     base = dict(FINAL)
     cfgs = [dict(label="BASELINE (live rules)", kw=dict(base))]
@@ -809,9 +995,10 @@ def cmd_diag(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["prep", "diag", "exits", "gates", "timing", "scores", "stagger", "addiag", "addon", "daily", "dailygrid", "split"])
+    ap.add_argument("cmd", choices=["prep", "diag", "exits", "gates", "timing", "scores", "stagger", "addiag", "addon", "daily", "dailygrid", "split", "overlay"])
     ap.add_argument("--capital", type=float, default=2e5)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--which", default="main")
     a = ap.parse_args()
     {"prep": prep, "diag": cmd_diag, "exits": cmd_exits, "gates": cmd_gates, "timing": cmd_timing, "scores": cmd_scores,
-     "stagger": cmd_stagger, "addiag": cmd_addiag, "addon": cmd_addon, "daily": cmd_daily, "dailygrid": cmd_dailygrid, "split": cmd_split}[a.cmd](a)
+     "stagger": cmd_stagger, "addiag": cmd_addiag, "addon": cmd_addon, "daily": cmd_daily, "dailygrid": cmd_dailygrid, "split": cmd_split, "overlay": cmd_overlay}[a.cmd](a)
