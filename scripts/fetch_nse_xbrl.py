@@ -21,6 +21,7 @@ import pandas as pd, requests
 
 BASE = Path(__file__).parent.parent
 RES = BASE/"data_store/nse_raw/events/results"
+INTEG = BASE/"data_store/nse_raw/events/integrated"      # new feed (fetch_nse_integrated.py), 2025+
 OUT = BASE/"data_store/nse_raw/xbrl"
 TABLE = BASE/"data_store/fundamentals.parquet"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -54,7 +55,16 @@ def index():
                          "known": pd.to_datetime(x.get("broadCastDate"), format="%d-%b-%Y %H:%M:%S", errors="coerce"),
                          "cons": x.get("consolidated") == "Consolidated", "bank": x.get("bank") == "Y",
                          "period_end": pd.to_datetime(x.get("toDate"), format="%d-%b-%Y", errors="coerce")})
-    return pd.DataFrame(rows).drop_duplicates("xbrl")
+    for p in sorted(INTEG.glob("*.json")) if INTEG.exists() else []:
+        for x in json.loads(p.read_text()):
+            u = x.get("xbrl")
+            if not (u and str(u).endswith(".xml")) or not x.get("symbol"):
+                continue
+            rows.append({"sym": str(x["symbol"]).strip(), "xbrl": u,
+                         "known": pd.to_datetime(x.get("broadcast_Date"), format="%d-%b-%Y %H:%M:%S", errors="coerce"),
+                         "cons": x.get("consolidated") == "Consolidated", "bank": False,
+                         "period_end": pd.to_datetime(x.get("qe_Date"), format="%d-%b-%Y", errors="coerce")})
+    return pd.DataFrame(rows).dropna(subset=["known", "period_end"]).drop_duplicates("xbrl")
 
 
 def fetch(u):
@@ -92,10 +102,16 @@ def parse(path):
     rec = {}
     for k, tags in FIELDS.items():
         for tg in tags:
-            m = dict(re.findall(rf'<in-bse-fin:{tg}\b[^>]*contextRef="([^"]+)"[^>]*>([-\d.Ee]+)<', t)[::-1])
+            m = dict(re.findall(rf'<in-(?:bse-fin|capmkt):{tg}\b[^>]*contextRef="([^"]+)"[^>]*>([-\d.Ee]+)<', t)[::-1])
             vals = [float(m[c]) for c in want if c in m]
             if vals:
                 rec[k] = vals[0]; break
+    st = re.search(r"DateOfStartOfReportingPeriod[^>]*>([\d-]+)<", t)          # quarter vs half-year vs annual
+    if st and end:
+        try:
+            rec["rp_days"] = (pd.Timestamp(end.group(1)) - pd.Timestamp(st.group(1))).days
+        except ValueError:
+            pass
     rec["file"] = Path(path).name
     return rec
 
@@ -119,16 +135,22 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--parse-only", action="store_true")
+    ap.add_argument("--subset", default=None, help="JSON list of XML urls: download only these")
+    ap.add_argument("--pause", type=float, default=None)
     a = ap.parse_args()
+    if a.pause is not None:
+        PAUSE = a.pause
     ix = index(); OUT.mkdir(parents=True, exist_ok=True)
     print(f"{len(ix):,} XBRL filings, {ix.sym.nunique()} symbols, {ix.known.min()}..{ix.known.max()}", flush=True)
     if not a.parse_only:
         counts = {}; t0 = time.time()
+        todo = ix["xbrl"] if not a.subset else ix.loc[ix["xbrl"].isin(set(json.loads(Path(a.subset).read_text()))), "xbrl"]
+        print(f"downloading {len(todo):,} files", flush=True)
         with ThreadPoolExecutor(a.workers) as ex:
-            for i, r in enumerate(ex.map(fetch, ix["xbrl"]), 1):
+            for i, r in enumerate(ex.map(fetch, todo), 1):
                 counts[r] = counts.get(r, 0) + 1
-                if i % 5000 == 0:
-                    print(f"{i}/{len(ix)} {counts} {time.time()-t0:.0f}s", flush=True)
+                if i % 1000 == 0:
+                    print(f"{i}/{len(todo)} {counts} {time.time()-t0:.0f}s", flush=True)
         print("download", counts, flush=True)
     T = build_table(ix)
     print(f"parsed {len(T):,} filings; field coverage:",

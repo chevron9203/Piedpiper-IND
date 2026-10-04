@@ -30,6 +30,8 @@ sys.path.insert(0, str(BASE))
 
 def quarterly():
     T = pd.read_parquet(BASE/"data_store/fundamentals.parquet").dropna(subset=["known", "period_end", "revenue"])
+    if "rp_days" in T.columns:                         # keep QUARTERLY figures only (new feed also carries half-year / annual)
+        T = T[T["rp_days"].isna() | T["rp_days"].between(60, 110)]
     T = T.sort_values("known")
     pref = T.groupby("sym")["cons"].mean().ge(0.5)
     T = T[T["cons"] == T["sym"].map(pref)]

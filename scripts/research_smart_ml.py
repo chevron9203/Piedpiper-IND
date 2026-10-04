@@ -229,10 +229,14 @@ def forward_returns(C, dates, h):
 
 
 # ---------------------------------------------------------------- model
-def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,), lambdarank=False, tmode="rank", train_dates=None):
+def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,), lambdarank=False, tmode="rank", train_dates=None,
+                 vol=None, lgb_over=None, rounds=400):
     import lightgbm as lgb
     df = X.join(y, how="inner")
     df["target"] = df.groupby(level="date")["fwd"].rank(pct=True)
+    if tmode == "volscaled":     # RISK-ADJUSTED label: rank of return per unit of trailing volatility (calmer winners)
+        v_ = vol.reindex(df.index).clip(lower=0.005)
+        df["target"] = (df["fwd"]/v_).groupby(level="date").rank(pct=True)
     if tmode == "topq":          # right-tail classifier: lands in the top 10% of the day
         df["target"] = (df["target"] >= 0.90).astype(float)
     elif tmode == "winsor":      # SIZE of the move, robustly scaled and capped (big winners count)
@@ -245,6 +249,8 @@ def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,), lambdarank=False
     params = dict(objective="binary" if tmode == "topq" else "regression", learning_rate=0.03, num_leaves=31,
                   min_data_in_leaf=400, feature_fraction=0.7, bagging_fraction=0.7,
                   bagging_freq=1, lambda_l2=10.0, verbose=-1, num_threads=8, seed=7)
+    if lgb_over:
+        params.update(lgb_over)
     for yr in range(TEST_FROM, min(dates.max().year, TEST_TO) + 1):
         start = pd.Timestamp(f"{yr}-01-01")
         # purge in TRADING days: a training row's label ends at cal[pos+1+h]; it must end
@@ -270,10 +276,10 @@ def walk_forward(X, y, h, step, cal, halflife=None, seeds=(7,), lambdarank=False
             if lambdarank:
                 m = lgb.train({**params, "seed": sd, "objective": "lambdarank", "lambdarank_truncation_level": 60,
                                "label_gain": list(range(30)), "eval_at": [20]},
-                              lgb.Dataset(tr[feats], rel, group=grp), num_boost_round=400)
+                              lgb.Dataset(tr[feats], rel, group=grp), num_boost_round=rounds)
             else:
                 m = lgb.train({**params, "seed": sd}, lgb.Dataset(tr[feats], tr["target"], weight=wt),
-                              num_boost_round=400)
+                              num_boost_round=rounds)
             ps.append(m.predict(te[feats]))
         p = pd.Series(np.mean(ps, axis=0), index=te.index, name="pred")
         preds.append(p)
@@ -406,7 +412,11 @@ def main():
     ap.add_argument("--halflife", type=float, default=None, help="recency weight half-life, years")
     ap.add_argument("--seeds", type=int, default=1, help="average this many LightGBM seeds")
     ap.add_argument("--no-mkt", action="store_true", help="drop market-state features (m_*)")
-    ap.add_argument("--target", default="rank", choices=["rank", "topq", "winsor"], help="training target")
+    ap.add_argument("--target", default="rank", choices=["rank", "topq", "winsor", "volscaled"], help="training target")
+    ap.add_argument("--lgb", default=None, help="LightGBM overrides, e.g. num_leaves=15,min_data_in_leaf=800,feature_fraction=0.5")
+    ap.add_argument("--rounds", type=int, default=400)
+    ap.add_argument("--ptag", default=None, help="name suffix for the prediction file")
+    ap.add_argument("--macro", action="store_true", help="add date-level macro/regime features (research_smart_macro.py)")
     ap.add_argument("--liq-max", type=int, default=None,
                     help="SPECIALIST universe: keep only the N most liquid stocks per date (ranks/targets are then within that set)")
     ap.add_argument("--predict-all", action="store_true",
@@ -435,6 +445,8 @@ def main():
         X = X.join(pd.read_parquet(BASE/f"data_store/smart_fund_s{fstep}.parquet"))
     if a.ann:
         X = X.join(pd.read_parquet(BASE/f"data_store/smart_ann_s{fstep}.parquet"))
+    if a.macro:
+        X = X.join(pd.read_parquet(BASE/"data_store/smart_macro.parquet"), on="date")
     if a.raw_sparse:
         SPARSE_RAW.update({"prom_net", "ins_net", "ins_buyers"})
     if a.no_insider:
@@ -446,6 +458,8 @@ def main():
         X = X[_liq <= a.liq_max]
         print(f"specialist universe: top {a.liq_max} by liquidity, {len(X):,} rows, {len(X)//X.index.get_level_values('date').nunique()} per date")
     print(f"features {X.shape} in {time.time()-t0:.0f}s")
+    vol_raw = X["vol63"] if "vol63" in X.columns else None
+    lgb_over = {k: (int(v) if v.lstrip("-").isdigit() else float(v)) for k, v in (kv.split("=") for kv in a.lgb.split(","))} if a.lgb else None
     Xr = rank_features(X)
     y = forward_returns(C, Xr.index.get_level_values("date").unique(), a.h)
     if a.shuffle:
@@ -453,10 +467,11 @@ def main():
         y = y.groupby(level="date", group_keys=False).apply(
             lambda g: pd.Series(rng.permutation(g.values), index=g.index)).rename("fwd")
     grid = set(C.index[260::a.step]) if a.predict_all else None
-    pred, imp = walk_forward(Xr, y, a.h, a.step, C.index, a.halflife, tuple(range(7, 7 + a.seeds)), a.lambdarank, a.target, grid)
+    pred, imp = walk_forward(Xr, y, a.h, a.step, C.index, a.halflife, tuple(range(7, 7 + a.seeds)), a.lambdarank, a.target, grid,
+                           vol=vol_raw, lgb_over=lgb_over, rounds=a.rounds)
     if a.preds_only:
         tg = f"h{a.h}_s{a.step}" + ("_ev" if a.events else "") + ("_pr" if a.peers else "") + ("_ni" if a.no_insider else "") + (f"_L{a.liq_max}" if a.liq_max else "") \
-            + (f"_x{a.seeds}" if a.seeds > 1 else "") + ("_px_d1" if a.predict_all else "_px") \
+            + (f"_x{a.seeds}" if a.seeds > 1 else "") + ("_px_d1" if a.predict_all else "_px") + (f"_{a.ptag}" if a.ptag else "") \
             + (f"_tf{TEST_FROM}-{TEST_TO}" if (a.test_from or a.test_to) else "")
         pred.to_frame().to_parquet(BASE/f"data_store/smart_ml_pred_{tg}.parquet")
         print(f"saved daily predictions {tg}: {len(pred):,} rows, {pred.index.get_level_values('date').nunique()} dates, {time.time()-t0:.0f}s")

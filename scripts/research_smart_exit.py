@@ -873,6 +873,42 @@ def cmd_overlay(a):
     pickle.dump(dict(R=R, Ym=Ym, res=[(r["label"], r["win"], r["off"], r["nav"]) for r in res]), open(BASE/"data_store/smart_overlay_results.pkl", "wb"))
 
 
+def cost_cfg(cfg):
+    """Cost-aware ranking: score - lam * (percentile of the stock's one-way cost on the decision date)."""
+    G = inputs()
+    if "c" not in _CP:
+        _CP["c"] = pickle.load(open(COMP, "rb"))
+    ml, mom = _CP["c"]["ml"], _CP["c"]["mom"]
+    a0, a1 = pd.Timestamp(cfg["start"]), pd.Timestamp(cfg["end"])
+    d = ml.index.get_level_values("date"); keep = (d >= a0) & (d <= a1)
+    mlk = ml[keep]; sc = (0.5*mlk + 0.5*mom.reindex(mlk.index)).dropna()
+    if cfg["lam"] > 0:
+        cm = G["cm"]; cp = cm.rank(axis=1, pct=True).values
+        di = cm.index.get_indexer(sc.index.get_level_values("date")); ci = cm.columns.get_indexer(sc.index.get_level_values("sym"))
+        pen = np.where((di >= 0) & (ci >= 0), cp[np.maximum(di, 0), np.maximum(ci, 0)], 0.5)
+        sc = sc - cfg["lam"]*np.nan_to_num(pen, nan=0.5)
+    out = simulate_rules(sc, G["C"], G["mkt"], G["cm"], end_date=a1, **dict(FINAL, every=5, offset=cfg["off"]))
+    return dict(lam=cfg["lam"], win=cfg["win"], off=cfg["off"], nav=out["nav"][:a1].astype("float32"), to=out["turnover"])
+
+
+def cmd_costaware(a):
+    pct = lambda x: x.groupby(level="date").rank(pct=True)
+    if not COMP.exists():
+        raise SystemExit("run `split` first")
+    cfgs = [dict(lam=l, win=wn, start=st, end=en, off=o) for l in (0.0, 0.03, 0.06, 0.10, 0.20) for wn, (st, en) in WIN.items() for o in range(5)]
+    with ProcessPoolExecutor(a.workers, mp_context=mp.get_context("spawn")) as ex:
+        res = list(ex.map(cost_cfg, cfgs))
+    R = pd.DataFrame([dict(lam=r["lam"], win=r["win"], **nstats(r["nav"]), to=r["to"]) for r in res])
+    M = R.groupby(["lam", "win"]).mean(numeric_only=True).unstack("win")
+    print("COST-AWARE RANKING: score minus lambda x cost percentile (mean of 5 weekday alignments; 50/50 blend)")
+    print(f"  {'lambda':<10}{'A 2013-2020 CAGR / DD / Sh':>30}{'B 2021-Oct26 CAGR / DD / Sh':>32}   turnover A / B")
+    for l in (0.0, 0.03, 0.06, 0.10, 0.20):
+        r = M.loc[l]
+        print(f"  {l:<10.2f}{r[('cagr', 'A 2013-2020')]*100:>+9.1f}% {r[('dd', 'A 2013-2020')]*100:>7.1f}% {r[('sh', 'A 2013-2020')]:>5.2f}"
+              f"{r[('cagr', 'B 2021-2026')]*100:>+12.1f}% {r[('dd', 'B 2021-2026')]*100:>7.1f}% {r[('sh', 'B 2021-2026')]:>5.2f}"
+              f"      {r[('to', 'A 2013-2020')]:>4.0%} / {r[('to', 'B 2021-2026')]:.0%}")
+
+
 def cmd_gates(a):
     base = dict(FINAL)
     cfgs = [dict(label="BASELINE (live rules)", kw=dict(base))]
@@ -995,10 +1031,10 @@ def cmd_diag(a):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["prep", "diag", "exits", "gates", "timing", "scores", "stagger", "addiag", "addon", "daily", "dailygrid", "split", "overlay"])
+    ap.add_argument("cmd", choices=["prep", "diag", "exits", "gates", "timing", "scores", "stagger", "addiag", "addon", "daily", "dailygrid", "split", "overlay", "costaware"])
     ap.add_argument("--capital", type=float, default=2e5)
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--which", default="main")
     a = ap.parse_args()
     {"prep": prep, "diag": cmd_diag, "exits": cmd_exits, "gates": cmd_gates, "timing": cmd_timing, "scores": cmd_scores,
-     "stagger": cmd_stagger, "addiag": cmd_addiag, "addon": cmd_addon, "daily": cmd_daily, "dailygrid": cmd_dailygrid, "split": cmd_split, "overlay": cmd_overlay}[a.cmd](a)
+     "stagger": cmd_stagger, "addiag": cmd_addiag, "addon": cmd_addon, "daily": cmd_daily, "dailygrid": cmd_dailygrid, "split": cmd_split, "overlay": cmd_overlay, "costaware": cmd_costaware}[a.cmd](a)
